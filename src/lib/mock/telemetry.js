@@ -15,12 +15,19 @@ export const telemetryNormal = {
   // Proses inkubasi: status idle | running | finished. stage: turning | lockdown
   incubation: {
     status: 'running',
+    current_day: 18,
+    total_days: 21,
     started_at: ago(86400 * 17),
     finish_at: ago(-86400 * 4),
     stage: 'turning'
   },
-  lamp: { mode: 'auto', intensity: 62 }, // mode: auto | manual, intensity 0-100 (%)
-  ventilation: { mode: 'auto', angle: 35 }, // angle 0 (tutup) - 90 (buka), derajat
+  device_condition: {
+    system_health: 'normal', // normal | warning | fault
+    uptime_seconds: 1490400,
+    summary: 'Hari ke-18 (Fase Turning). Suhu dan aktuator bekerja normal.'
+  },
+  lamp: { mode: 'auto', intensity: 62, fuzzy_active: true }, // mode: auto | manual, intensity 0-100 (%)
+  ventilation: { mode: 'auto', angle: 35, fuzzy_active: true }, // angle 0 (tutup) - 90 (buka), derajat
   motor: { running: false, encoder_ok: true },
   // status: idle (menunggu jadwal) | turning | lockdown | fault
   turning: { status: 'idle', last_turned_at: ago(3600 * 2), next_turning_at: ago(-3600) },
@@ -38,6 +45,7 @@ export const telemetryStale = {
 export const telemetryAlert = {
   ...telemetryNormal,
   temperature: 39.4,
+  device_condition: { system_health: 'fault', uptime_seconds: 1490400, summary: 'Suhu di atas batas dan motor pembalik bermasalah.' },
   motor: { running: false, encoder_ok: false },
   turning: { ...telemetryNormal.turning, status: 'fault' }
 };
@@ -45,7 +53,8 @@ export const telemetryAlert = {
 // Inkubasi sudah selesai (untuk menguji penanda selesai)
 export const telemetryDone = {
   ...telemetryNormal,
-  incubation: { status: 'finished', started_at: ago(86400 * 21 + 3600), finish_at: ago(3600), stage: 'lockdown' },
+  incubation: { status: 'finished', current_day: 21, total_days: 21, started_at: ago(86400 * 21 + 3600), finish_at: ago(3600), stage: 'lockdown' },
+  device_condition: { system_health: 'normal', uptime_seconds: 1900000, summary: 'Siklus 21 hari selesai. Alat siap untuk inkubasi berikutnya.' },
   turning: { status: 'lockdown', last_turned_at: ago(86400 * 3), next_turning_at: null }
 };
 
@@ -67,5 +76,15 @@ export const auditLogs = [
   { id: 7, user: 'operator1', event: 'command', detail: 'Ventilasi diubah ke mode otomatis', timestamp: ago(3600 * 30) },
   { id: 8, user: 'operator2', event: 'config_change', detail: 'SSID Wi-Fi diubah', timestamp: ago(3600 * 24 * 4) }
 ];
+
+// Tambahan data contoh supaya paginasi Riwayat bisa dicoba
+const contoh = [
+  ['command', 'Lampu diubah ke mode otomatis'], ['login', 'Login berhasil'], ['command', 'Ventilasi diubah ke 45°'],
+  ['config_change', 'Parameter motor diubah'], ['command', 'Pembalikan manual']
+];
+for (let i = 0; i < 40; i++) {
+  const [event, detail] = contoh[i % 5];
+  auditLogs.push({ id: 100 + i, user: i % 3 ? 'operator1' : 'operator2', event, detail, timestamp: ago(3600 * (10 + i * 3)) });
+}
 
 export const users = [{ id: 1, username: 'operator1', role: 'operator' }];

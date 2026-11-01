@@ -1,16 +1,13 @@
 <script>
   import {
-    getTelemetry, getThresholds, getSettings, getLimits,
+    getSettings, getLimits,
     saveTargetTemperature, saveMotorSettings, saveWifi
   } from '$lib/api.js';
-  import { ageSeconds } from '$lib/format.js';
+  import { live, isStale, aktifkanNotifikasi, kirimNotifikasiUji } from '$lib/live.svelte.js';
 
-  let data = $state(null); // telemetri, untuk tahu perangkat terhubung atau tidak
   let settings = $state(null);
   let limits = $state(null);
   let error = $state('');
-  let now = $state(Date.now());
-  let staleDetik = $state(60);
 
   // Isian di layar (draft). Baru dikirim saat tombol ditekan
   let target = $state(37.5);
@@ -30,25 +27,16 @@
   ];
 
   $effect(() => {
-    Promise.all([getSettings(), getLimits(), getThresholds()]).then(([s, l, t]) => {
-      settings = s; limits = l; staleDetik = t.stale_seconds;
+    Promise.all([getSettings(), getLimits()]).then(([s, l]) => {
+      settings = s; limits = l;
       target = s.target_temperature;
       motor = { ...s.motor };
       ssid = s.wifi.ssid;
     }).catch((e) => (error = e.message));
   });
 
-  async function muat() {
-    try { data = await getTelemetry(); } catch (e) { error = e.message; }
-  }
-  $effect(() => {
-    muat();
-    const ambil = setInterval(muat, 5000);
-    const detak = setInterval(() => (now = Date.now()), 1000);
-    return () => { clearInterval(ambil); clearInterval(detak); };
-  });
-
-  let kedaluwarsa = $derived(!!data && (data.connection === 'offline' || ageSeconds(data.updated_at, now) > staleDetik));
+  let data = $derived(live.data); // telemetri bersama, untuk tahu perangkat terhubung atau tidak
+  let kedaluwarsa = $derived(isStale());
   let terkunci = $derived(!data || kedaluwarsa);
 
   async function jalankan(kunci, fn, pesanOk) {
@@ -105,7 +93,7 @@
     konfirmasiWifi = false;
     const nama = ssid.trim();
     const ok = await jalankan('wifi', () => saveWifi({ ssid: nama, password: sandi }),
-      'Pengaturan Wi-Fi terkirim. Perangkat akan mencoba tersambung ke jaringan baru, dan sementara bisa terputus.');
+      'Terkirim ke perangkat. Perangkat mencoba tersambung ke jaringan baru maksimal 30 detik. Jika gagal, otomatis kembali ke Wi-Fi lama dan muncul peringatan komunikasi.');
     sandi = ''; // kata sandi tidak disimpan di layar
     lihatSandi = false;
     if (ok) settings.wifi.ssid = nama;
@@ -188,7 +176,7 @@
       {#if konfirmasiWifi}
         <div class="rounded border border-red-700 bg-red-50 p-3 text-sm text-red-900">
           <p class="font-medium">⚠ Kirim pengaturan Wi-Fi ke perangkat?</p>
-          <p class="mt-1">Jika nama atau kata sandi salah, perangkat akan terputus dan tidak bisa dipantau atau dikendalikan dari aplikasi sampai diperbaiki langsung di alat. Jaringan baru: <strong>{ssid.trim()}</strong>.</p>
+          <p class="mt-1">Perangkat akan mencoba tersambung ke <strong>{ssid.trim()}</strong> maksimal 30 detik, dan data bisa terputus sebentar. Jika gagal, perangkat otomatis kembali ke Wi-Fi lama dan muncul peringatan komunikasi.</p>
           <div class="mt-3 flex gap-2">
             <button type="button" onclick={kirimWifi} class="rounded bg-red-800 px-4 py-2 text-white">Ya, kirim</button>
             <button type="button" onclick={() => (konfirmasiWifi = false)} class="rounded border border-slate-400 bg-white px-4 py-2 text-slate-900">Batal</button>
@@ -202,5 +190,22 @@
       {/if}
     </fieldset>
     {#if hasil.wifi}<p role="status" class="mt-2 text-sm {hasil.wifi.ok ? 'text-emerald-900' : 'text-red-900'}">{hasil.wifi.ok ? '✓' : '⚠'} {hasil.wifi.teks}</p>{/if}
+  </section>
+
+  <!-- NOTIFIKASI -->
+  <section class="mt-4 rounded-lg border border-slate-300 bg-white p-4 md:max-w-xl">
+    <h2 class="text-lg font-semibold">Notifikasi peringatan</h2>
+    <p class="mt-1 text-sm text-slate-600">Notifikasi browser muncul saat ada peringatan baru dan saat inkubasi selesai, selama halaman ini terbuka atau diminimalkan.</p>
+    {#if live.izin === 'granted'}
+      <p class="mt-3 text-sm text-emerald-900">✓ Notifikasi aktif di browser ini.</p>
+      <button type="button" onclick={kirimNotifikasiUji} class="mt-2 rounded border border-slate-400 px-4 py-2 text-sm">Kirim notifikasi uji</button>
+    {:else if live.izin === 'denied'}
+      <p class="mt-3 text-sm text-red-900">⚠ Notifikasi diblokir. Klik ikon gembok di sebelah alamat web, lalu izinkan Notifikasi.</p>
+    {:else if live.izin === 'unsupported'}
+      <p class="mt-3 text-sm text-slate-600">Browser ini tidak mendukung notifikasi.</p>
+    {:else}
+      <button type="button" onclick={aktifkanNotifikasi} class="mt-3 rounded bg-slate-900 px-4 py-2 text-white">Aktifkan notifikasi</button>
+    {/if}
+    <p class="mt-2 text-sm text-slate-600">Peringatan penting juga dikirim lewat Telegram oleh server.</p>
   </section>
 {/if}

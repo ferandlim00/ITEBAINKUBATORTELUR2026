@@ -3,6 +3,7 @@
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
   import { auth, initAuth, keluar } from '$lib/auth.svelte.js';
+  import { startLive, stopLive } from '$lib/live.svelte.js';
 
   let { children } = $props();
 
@@ -23,6 +24,11 @@
     if (!auth.siap) return;
     if (!auth.user && !diLogin) goto('/login');
     if (auth.user && diLogin) goto('/');
+  });
+
+  // Pemantauan data alat hanya jalan saat sudah login
+  $effect(() => {
+    if (auth.user) startLive(); else stopLive();
   });
 
   async function klikKeluar() {

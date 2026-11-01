@@ -1,17 +1,14 @@
 <script>
-  import { getTelemetry, sendCommand } from '$lib/api.js';
-  import { ageSeconds } from '$lib/format.js';
+  import { sendCommand, getLimits } from '$lib/api.js';
+  import { live, isStale, refresh } from '$lib/live.svelte.js';
   import StatusBadge from '$lib/components/StatusBadge.svelte';
+  import StatusPerintah from '$lib/components/StatusPerintah.svelte';
   import { statusPutar } from '$lib/turning.js';
 
-  // Batas SEMENTARA. Nilai asli menunggu keputusan tim hardware
-  const LAMPU_MAKS_MANUAL = 80; // % intensitas lampu tertinggi yang boleh diatur manual
-  const VENTILASI_MAKS = 90; // derajat, 0 = tutup
-  const BATAS_KEDALUWARSA_DETIK = 60;
-
-  let data = $state(null);
-  let error = $state('');
-  let now = $state(Date.now());
+  // Batas diambil dari backend (GET /settings/limits). Nilai cadangan ini sama dengan kontrak v2.1
+  let limits = $state(null);
+  let lampuMaks = $derived(limits?.lamp_manual_intensity?.max ?? 80);
+  let ventMaks = $derived(limits?.ventilation_angle?.max ?? 90);
 
   // Pilihan yang sedang diatur di layar (draft). Belum dikirim sampai tombol Terapkan ditekan
   let lampuMode = $state('auto');
@@ -20,41 +17,31 @@
   let ventNilai = $state(30);
   let draftSiap = false;
 
-  let sibuk = $state({}); // { lamp: true, ventilation: true, turning: true }
-  let hasil = $state({}); // { lamp: { ok: true, teks: '...' } }
+  let sibuk = $state({});
+  let hasil = $state({});
 
-  async function muat() {
-    try {
-      data = await getTelemetry();
-      error = '';
-      if (!draftSiap) {
-        // Isi draft sekali dari kondisi alat saat ini
-        lampuMode = data.lamp.mode; lampuNilai = Math.min(data.lamp.intensity, LAMPU_MAKS_MANUAL);
-        ventMode = data.ventilation.mode; ventNilai = data.ventilation.angle;
-        draftSiap = true;
-      }
-    } catch (e) {
-      error = e.message;
-    }
-  }
+  $effect(() => { getLimits().then((l) => (limits = l)).catch(() => {}); });
 
   $effect(() => {
-    muat();
-    const ambil = setInterval(muat, 5000);
-    const detak = setInterval(() => (now = Date.now()), 1000);
-    return () => { clearInterval(ambil); clearInterval(detak); };
+    const d = live.data;
+    if (d && !draftSiap) {
+      draftSiap = true; // isi draft sekali dari kondisi alat saat ini
+      lampuMode = d.lamp.mode; lampuNilai = Math.min(d.lamp.intensity, 80);
+      ventMode = d.ventilation.mode; ventNilai = d.ventilation.angle;
+    }
   });
 
-  let kedaluwarsa = $derived(!!data && (data.connection === 'offline' || ageSeconds(data.updated_at, now) > BATAS_KEDALUWARSA_DETIK));
+  let data = $derived(live.data);
+  let kedaluwarsa = $derived(isStale());
   let terkunci = $derived(!data || kedaluwarsa);
 
   async function kirim(kunci, perintah) {
     sibuk[kunci] = true;
     hasil[kunci] = null;
     try {
-      await sendCommand(perintah);
-      hasil[kunci] = { ok: true, teks: 'Perintah terkirim ke perangkat.' };
-      await muat();
+      const r = await sendCommand(perintah);
+      hasil[kunci] = { ok: true, id: r.id };
+      await refresh();
     } catch (e) {
       hasil[kunci] = { ok: false, teks: `Gagal mengirim: ${e.message}` };
     } finally {
@@ -64,13 +51,13 @@
 
   function terapkanLampu() {
     const p = { target: 'lamp', mode: lampuMode };
-    if (lampuMode === 'manual') p.intensity = Math.min(Math.max(Number(lampuNilai), 0), LAMPU_MAKS_MANUAL);
+    if (lampuMode === 'manual') p.intensity = Math.min(Math.max(Number(lampuNilai), 0), lampuMaks);
     kirim('lamp', p);
   }
 
   function terapkanVentilasi() {
     const p = { target: 'ventilation', mode: ventMode };
-    if (ventMode === 'manual') p.angle = Math.min(Math.max(Number(ventNilai), 0), VENTILASI_MAKS);
+    if (ventMode === 'manual') p.angle = Math.min(Math.max(Number(ventNilai), 0), ventMaks);
     kirim('ventilation', p);
   }
 
@@ -92,10 +79,8 @@
 
 <h1 class="text-2xl font-semibold">Kontrol</h1>
 
-{#if error}
-  <p class="mt-4 rounded border border-red-700 bg-red-100 p-3 text-red-900">⚠ Gagal memuat data: {error}. Coba lagi dalam beberapa detik.</p>
-{:else if !data}
-  <p class="mt-4 text-slate-600">Memuat data…</p>
+{#if !data}
+  <p class="mt-4 text-slate-600">{live.error ? `⚠ Gagal memuat data: ${live.error}` : 'Memuat data…'}</p>
 {:else}
   {#if terkunci}
     <p class="mt-4 rounded border border-amber-700 bg-amber-100 p-3 text-amber-900">
@@ -107,7 +92,9 @@
     <!-- LAMPU -->
     <section class="rounded-lg border border-slate-300 bg-white p-4">
       <h2 class="text-lg font-semibold">Lampu pemanas</h2>
-      <p class="mt-1 text-sm text-slate-600">Saat ini: {data.lamp.mode === 'auto' ? 'otomatis' : 'manual'}, intensitas {data.lamp.intensity}%</p>
+      <p class="mt-1 text-sm text-slate-600">
+        Saat ini: {data.lamp.mode === 'auto' ? (data.lamp.fuzzy_active ? 'otomatis (fuzzy)' : 'otomatis') : 'manual'}, intensitas {data.lamp.intensity}%
+      </p>
 
       <fieldset class="mt-3" disabled={terkunci}>
         <legend class="text-sm font-medium">Mode</legend>
@@ -117,11 +104,11 @@
         </div>
 
         {#if lampuMode === 'manual'}
-          <label class="mt-3 block text-sm font-medium" for="lampu-nilai">Intensitas: {lampuNilai}% (maks. {LAMPU_MAKS_MANUAL}%)</label>
-          <input id="lampu-nilai" type="range" min="0" max={LAMPU_MAKS_MANUAL} bind:value={lampuNilai} class="w-full" />
+          <label class="mt-3 block text-sm font-medium" for="lampu-nilai">Intensitas: {lampuNilai}% (maks. {lampuMaks}%)</label>
+          <input id="lampu-nilai" type="range" min="0" max={lampuMaks} bind:value={lampuNilai} class="w-full" />
           <p class="mt-1 text-sm text-amber-900">⚠ Mode manual tidak menjaga suhu otomatis. Pantau suhu di Dashboard.</p>
         {:else}
-          <p class="mt-3 text-sm text-slate-600">Intensitas diatur otomatis oleh alat berdasarkan suhu.</p>
+          <p class="mt-3 text-sm text-slate-600">Intensitas diatur otomatis oleh logika fuzzy di perangkat.</p>
         {/if}
 
         <button type="button" onclick={terapkanLampu} disabled={terkunci || sibuk.lamp}
@@ -129,13 +116,18 @@
           {sibuk.lamp ? 'Mengirim…' : 'Terapkan'}
         </button>
       </fieldset>
-      {#if hasil.lamp}<p class="mt-2 text-sm {hasil.lamp.ok ? 'text-emerald-900' : 'text-red-900'}">{hasil.lamp.ok ? '✓' : '⚠'} {hasil.lamp.teks}</p>{/if}
+      {#if hasil.lamp}
+        {#if hasil.lamp.ok}<div class="mt-2"><StatusPerintah id={hasil.lamp.id} /></div>
+        {:else}<p role="alert" class="mt-2 text-sm text-red-900">⚠ {hasil.lamp.teks}</p>{/if}
+      {/if}
     </section>
 
     <!-- VENTILASI -->
     <section class="rounded-lg border border-slate-300 bg-white p-4">
       <h2 class="text-lg font-semibold">Ventilasi</h2>
-      <p class="mt-1 text-sm text-slate-600">Saat ini: {data.ventilation.mode === 'auto' ? 'otomatis' : 'manual'}, bukaan {data.ventilation.angle}°</p>
+      <p class="mt-1 text-sm text-slate-600">
+        Saat ini: {data.ventilation.mode === 'auto' ? (data.ventilation.fuzzy_active ? 'otomatis (fuzzy)' : 'otomatis') : 'manual'}, bukaan {data.ventilation.angle}°
+      </p>
 
       <fieldset class="mt-3" disabled={terkunci}>
         <legend class="text-sm font-medium">Mode</legend>
@@ -145,8 +137,8 @@
         </div>
 
         {#if ventMode === 'manual'}
-          <label class="mt-3 block text-sm font-medium" for="vent-nilai">Bukaan: {ventNilai}° (0° tutup, {VENTILASI_MAKS}° buka penuh)</label>
-          <input id="vent-nilai" type="range" min="0" max={VENTILASI_MAKS} bind:value={ventNilai} class="w-full" />
+          <label class="mt-3 block text-sm font-medium" for="vent-nilai">Bukaan: {ventNilai}° (0° tutup, {ventMaks}° buka penuh)</label>
+          <input id="vent-nilai" type="range" min="0" max={ventMaks} bind:value={ventNilai} class="w-full" />
         {:else}
           <p class="mt-3 text-sm text-slate-600">Bukaan diatur otomatis oleh logika fuzzy di perangkat.</p>
         {/if}
@@ -156,7 +148,10 @@
           {sibuk.ventilation ? 'Mengirim…' : 'Terapkan'}
         </button>
       </fieldset>
-      {#if hasil.ventilation}<p class="mt-2 text-sm {hasil.ventilation.ok ? 'text-emerald-900' : 'text-red-900'}">{hasil.ventilation.ok ? '✓' : '⚠'} {hasil.ventilation.teks}</p>{/if}
+      {#if hasil.ventilation}
+        {#if hasil.ventilation.ok}<div class="mt-2"><StatusPerintah id={hasil.ventilation.id} /></div>
+        {:else}<p role="alert" class="mt-2 text-sm text-red-900">⚠ {hasil.ventilation.teks}</p>{/if}
+      {/if}
     </section>
   </div>
 
@@ -174,7 +169,8 @@
     </button>
     {#if alasanBalik}<p class="mt-2 text-sm text-slate-600">Tidak tersedia: {alasanBalik}.</p>{/if}
     {#if hasil.turning}
-      <p role="status" class="mt-2 text-sm {hasil.turning.ok ? 'text-emerald-900' : 'text-red-900'}">{hasil.turning.ok ? '✓' : '⚠'} {hasil.turning.teks}</p>
+      {#if hasil.turning.ok}<div class="mt-2"><StatusPerintah id={hasil.turning.id} /></div>
+      {:else}<p role="alert" class="mt-2 text-sm text-red-900">⚠ {hasil.turning.teks}</p>{/if}
     {/if}
   </section>
 {/if}

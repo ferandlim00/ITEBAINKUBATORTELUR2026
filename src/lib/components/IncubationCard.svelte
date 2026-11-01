@@ -1,16 +1,17 @@
 <script>
   import StatusBadge from './StatusBadge.svelte';
   import { durasiText, hariKe, tanggalText } from '$lib/format.js';
+  import StatusPerintah from './StatusPerintah.svelte';
 
   // inc: { status: idle|running|finished, started_at, finish_at, stage }
   let { inc, now, terkunci = false, sibuk = false, hasil = null, onkirim } = $props();
 
-  const TOTAL_HARI = 21;
   const tahap = { turning: 'Masa pembalikan telur', lockdown: 'Lockdown, persiapan menetas' };
 
   let konfirmasi = $state(false);
   let sisa = $derived(inc.finish_at ? Math.round((new Date(inc.finish_at).getTime() - now) / 1000) : 0);
-  let hari = $derived(inc.started_at ? Math.min(hariKe(inc.started_at, now), TOTAL_HARI) : 0);
+  let total = $derived(inc.total_days ?? 21);
+  let hari = $derived(inc.current_day ?? (inc.started_at ? Math.min(hariKe(inc.started_at, now), total) : 0));
 
   function berhenti() {
     konfirmasi = false;
@@ -39,7 +40,7 @@
   {#if inc.status === 'running'}
     <dl class="mt-3 grid grid-cols-2 gap-y-2 text-sm md:grid-cols-4">
       <div><dt class="text-slate-600">Hari mulai</dt><dd class="font-medium">{tanggalText(inc.started_at)}</dd></div>
-      <div><dt class="text-slate-600">Hari ke</dt><dd class="font-medium">{hari} dari {TOTAL_HARI}</dd></div>
+      <div><dt class="text-slate-600">Hari ke</dt><dd class="font-medium">{hari} dari {total}</dd></div>
       <div><dt class="text-slate-600">Sisa waktu</dt><dd class="font-medium">{durasiText(sisa)}</dd></div>
       <div><dt class="text-slate-600">Tahapan</dt><dd class="font-medium">{tahap[inc.stage] ?? 'Sedang diproses'}</dd></div>
     </dl>
@@ -69,6 +70,9 @@
       </button>
     {/if}
     {#if terkunci}<p class="mt-2 text-sm text-slate-600">Tidak tersedia: perangkat tidak terhubung atau data kedaluwarsa.</p>{/if}
-    {#if hasil}<p role="status" class="mt-2 text-sm {hasil.ok ? 'text-emerald-900' : 'text-red-900'}">{hasil.ok ? '✓' : '⚠'} {hasil.teks}</p>{/if}
+    {#if hasil}
+      {#if hasil.ok && hasil.id}<div class="mt-2"><StatusPerintah id={hasil.id} /></div>
+      {:else}<p role="status" class="mt-2 text-sm {hasil.ok ? 'text-emerald-900' : 'text-red-900'}">{hasil.ok ? '✓' : '⚠'} {hasil.teks}</p>{/if}
+    {/if}
   </div>
 </section>
