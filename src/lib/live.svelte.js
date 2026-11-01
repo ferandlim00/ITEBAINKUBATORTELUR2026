@@ -106,5 +106,5 @@ export async function aktifkanNotifikasi() {
 }
 
 export function kirimNotifikasiUji() {
-  beritahu('Notifikasi aktif', 'Ini contoh notifikasi dari Smart Hatchery.', 'uji');
+     beritahu('Notifikasi aktif', 'Ini contoh notifikasi dari Smart Hatchery.', 'uji-' + Date.now());
 }
