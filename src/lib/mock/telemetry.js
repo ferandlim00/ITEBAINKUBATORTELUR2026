@@ -11,7 +11,8 @@ export const telemetryNormal = {
   updated_at: ago(3),
   temperature: 37.5, // °C
   target_temperature: 37.5, // °C, diatur operator
-  humidity: 58, // %RH, hanya indikator pengaman
+  target_humidity: 55, // %RH, diatur operator
+  humidity: 58, // %RH
   // Proses inkubasi: status idle | running | finished. stage: turning | lockdown
   incubation: {
     status: 'running',

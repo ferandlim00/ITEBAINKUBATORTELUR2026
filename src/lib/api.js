@@ -90,6 +90,7 @@ export async function getTelemetry() {
     // server_time belum ada di kontrak v2.1 (usulan ke Dodos). Frontend memakainya kalau ada, supaya umur data tidak bergantung jam laptop
     hasil.server_time = new Date().toISOString();
     hasil.target_temperature = mockSettings.target_temperature;
+    hasil.target_humidity = mockSettings.target_humidity;
     hasil.wifi = { ...hasil.wifi, ssid: mockSettings.wifi.ssid };
     return hasil;
   }
@@ -126,7 +127,7 @@ export async function getAuditLogs({ from, to, event, page = 1, limit = 50 } = {
 
 // Ambang peringatan dibaca saja (ditetapkan pemilik data perangkat, bukan lewat UI)
 export async function getThresholds() {
-  if (USE_MOCK) { await tunggu(150); return { temp_min: 36.5, temp_max: 38.5, stale_seconds: 15 }; }
+  if (USE_MOCK) { await tunggu(150); return { temp_min: 36.5, temp_max: 38.5, hum_min: 45, hum_max: 70, stale_seconds: 15 }; }
   return request('/settings/thresholds');
 }
 
@@ -169,18 +170,16 @@ export async function sendCommand(command) {
 // Nilai di bawah hanya untuk mode mock. Batas SEMENTARA: nilai asli menunggu keputusan tim hardware.
 const mockSettings = {
   target_temperature: 37.5,
-  motor: { interval_minutes: 120, duration_seconds: 20, speed_percent: 50 },
+  target_humidity: 55,
+  motor: { interval_minutes: 120 },
   wifi: { ssid: 'IncubatorNet' } // kata sandi Wi-Fi tidak pernah dikembalikan
 };
 const mockLimits = {
   target_temperature: { min: 36.5, max: 38.5 },
+  target_humidity: { min: 40, max: 75 },
   lamp_manual_intensity: { min: 0, max: 80 },
   ventilation_angle: { min: 0, max: 90 },
-  motor: {
-    interval_minutes: { min: 30, max: 480 },
-    duration_seconds: { min: 5, max: 60 },
-    speed_percent: { min: 10, max: 70 }
-  }
+  motor: { interval_minutes: { min: 30, max: 480 } }
 };
 
 export async function getSettings() {
@@ -199,7 +198,12 @@ export async function saveTargetTemperature(value) {
   return request('/settings/target-temperature', { method: 'PUT', body: JSON.stringify({ value }) });
 }
 
-// { interval_minutes, duration_seconds, speed_percent }
+// { interval_minutes }
+export async function saveTargetHumidity(value) {
+  if (USE_MOCK) { await tunggu(500); mockSettings.target_humidity = value; return { status: 'sent' }; }
+  return request('/settings/target-humidity', { method: 'PUT', body: JSON.stringify({ value }) });
+}
+
 export async function saveMotorSettings(data) {
   if (USE_MOCK) { await tunggu(500); Object.assign(mockSettings.motor, data); return { status: 'sent' }; }
   return request('/settings/motor', { method: 'PUT', body: JSON.stringify(data) });
@@ -209,4 +213,44 @@ export async function saveMotorSettings(data) {
 export async function saveWifi({ ssid, password }) {
   if (USE_MOCK) { await tunggu(800); mockSettings.wifi.ssid = ssid; return { status: 'sent' }; }
   return request('/settings/wifi', { method: 'PUT', body: JSON.stringify({ ssid, password }) });
+}
+
+// ---------- Riwayat data sensor untuk grafik ----------
+// GET /telemetry/history?from=&to=&max_points= → [{ t, temperature, humidity, lamp_intensity }]
+// Backend sebaiknya merata-ratakan data supaya jumlah titik tidak melebihi max_points.
+function acak(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+export async function getHistory({ from, to, maxPoints = 120 } = {}) {
+  if (USE_MOCK) {
+    await tunggu(250);
+    const t0 = new Date(from).getTime();
+    const t1 = new Date(to).getTime();
+    const hasil = [];
+    for (let i = 0; i < maxPoints; i++) {
+      const tms = t0 + (i * (t1 - t0)) / (maxPoints - 1);
+      const jam = tms / 3600000;
+      const r = acak(Math.round(tms / 60000))();
+      const loncat = jam % 22 > 19.2 && jam % 22 < 19.9 ? 1.3 : 0; // sesekali suhu naik, supaya evaluasi menarik
+      const suhu = mockSettings.target_temperature + 0.3 * Math.sin((2 * Math.PI * jam) / 3) + (r - 0.5) * 0.08 + loncat;
+      const lembap = mockSettings.target_humidity + 3 * Math.sin((2 * Math.PI * jam) / 5) + (r - 0.5) * 1.1;
+      const lampu = Math.min(80, Math.max(0, 60 - (suhu - mockSettings.target_temperature) * 30 + (r - 0.5) * 3));
+      hasil.push({
+        t: new Date(tms).toISOString(),
+        temperature: Math.round(suhu * 100) / 100,
+        humidity: Math.round(lembap * 10) / 10,
+        lamp_intensity: Math.round(lampu)
+      });
+    }
+    return hasil;
+  }
+  const q = new URLSearchParams({ from, to, max_points: String(maxPoints) });
+  return request('/telemetry/history?' + q.toString());
 }

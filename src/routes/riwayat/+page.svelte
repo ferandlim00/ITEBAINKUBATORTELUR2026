@@ -1,4 +1,5 @@
 <script>
+  import Ikon from '$lib/components/Ikon.svelte';
   import { getAuditLogs } from '$lib/api.js';
   import { tanggalText } from '$lib/format.js';
 
@@ -48,39 +49,39 @@
 
 <div class="mt-4 flex flex-wrap gap-4 text-sm">
   <label>Rentang waktu:
-    <select bind:value={filterJam} onchange={() => (halaman = 1)} class="ml-2 rounded border border-slate-400 bg-white px-2 py-1">
+    <select bind:value={filterJam} onchange={() => (halaman = 1)} class="ml-2 input-kecil">
       {#each rentang as r}<option value={r.jam}>{r.teks}</option>{/each}
     </select>
   </label>
   <label>Jenis kejadian:
-    <select bind:value={filterJenis} onchange={() => (halaman = 1)} class="ml-2 rounded border border-slate-400 bg-white px-2 py-1">
+    <select bind:value={filterJenis} onchange={() => (halaman = 1)} class="ml-2 input-kecil">
       <option value="semua">Semua</option>
       {#each Object.entries(jenis) as [kode, teks]}<option value={kode}>{teks}</option>{/each}
     </select>
   </label>
-  {#if memuat}<span class="ml-auto text-slate-600">Memuat…</span>{/if}
+  {#if memuat}<span class="ml-auto text-mute">Memuat…</span>{/if}
 </div>
 
 {#if error}
-  <p class="mt-4 rounded border border-red-700 bg-red-100 p-3 text-red-900">⚠ Gagal memuat riwayat: {error}.</p>
+  <p class="mt-4 rounded border border-bad/60 bg-bad/10 p-3 text-bad"><Ikon nama="bahaya" /> Gagal memuat riwayat: {error}.</p>
 {:else if !logs}
-  <p class="mt-4 text-slate-600">Memuat riwayat…</p>
+  <p class="mt-4 text-mute">Memuat riwayat…</p>
 {:else if logs.length === 0}
-  <p class="mt-6 rounded-lg border border-slate-300 bg-white p-4 text-slate-600">
+  <p class="mt-6 kartu p-4 text-mute">
     {halaman > 1 ? 'Tidak ada data lagi di halaman ini.' : 'Tidak ada kejadian untuk filter ini. Coba perluas rentang waktu.'}
   </p>
 {:else}
-  <div class="mt-4 overflow-x-auto rounded-lg border border-slate-300 bg-white">
+  <div class="mt-4 overflow-x-auto kartu">
     <table class="w-full min-w-[32rem] text-left text-sm">
-      <thead class="border-b border-slate-300 bg-slate-50">
+      <thead class="border-b border-line bg-white/5">
         <tr><th class="p-3">Waktu</th><th class="p-3">Pengguna</th><th class="p-3">Kejadian</th><th class="p-3">Keterangan</th></tr>
       </thead>
       <tbody>
         {#each logs as l (l.id)}
-          <tr class="border-b border-slate-200 last:border-0">
+          <tr class="border-b border-line last:border-0">
             <td class="whitespace-nowrap p-3">{tanggalText(l.timestamp)}</td>
             <td class="p-3">{l.user}</td>
-            <td class="p-3">{l.event === 'access_denied' ? '⚠ ' : ''}{jenis[l.event] ?? l.event}</td>
+            <td class="p-3">{#if l.event === 'access_denied'}<Ikon nama="bahaya" class="text-warn" /> {/if}{jenis[l.event] ?? l.event}</td>
             <td class="p-3">{l.detail}</td>
           </tr>
         {/each}
@@ -91,8 +92,8 @@
 
 <div class="mt-4 flex items-center gap-3 text-sm">
   <button type="button" onclick={() => (halaman -= 1)} disabled={halaman === 1 || memuat}
-    class="rounded border border-slate-400 bg-white px-3 py-1 disabled:cursor-not-allowed disabled:opacity-40">← Sebelumnya</button>
+    class="tombol tombol-sekunder tombol-kecil"><Ikon nama="kiri" /> Sebelumnya</button>
   <span>Halaman {halaman}</span>
   <button type="button" onclick={() => (halaman += 1)} disabled={!logs || logs.length < PER_HALAMAN || memuat}
-    class="rounded border border-slate-400 bg-white px-3 py-1 disabled:cursor-not-allowed disabled:opacity-40">Berikutnya →</button>
+    class="tombol tombol-sekunder tombol-kecil">Berikutnya <Ikon nama="kanan" /></button>
 </div>

@@ -1,14 +1,19 @@
 <script>
   // tone: ok | warn | bad | mute. Selalu ada ikon + teks, bukan warna saja (DES 02)
+  import Ikon from './Ikon.svelte';
+
   let { tone = 'mute', icon = '', label = '' } = $props();
+  // Kode lama berupa karakter teks dipetakan ke ikon garis yang serasi dengan tema
+  const peta = { '✓': 'ok', '⚠': 'bahaya', '↓': 'turun', '↑': 'naik', '⏱': 'jam', '⏸': 'jeda', '↻': 'putar', '!': 'info', '?': 'tanya', '●': 'titik', '⚙': 'otomatis' };
+  const nama = $derived(peta[icon] ?? icon);
   const warna = {
-    ok: 'bg-emerald-100 text-emerald-900 border-emerald-700',
-    warn: 'bg-amber-100 text-amber-900 border-amber-700',
-    bad: 'bg-red-100 text-red-900 border-red-700',
-    mute: 'bg-slate-200 text-slate-800 border-slate-500'
+    ok: 'border-good/50 bg-good/10 text-good',
+    warn: 'border-warn/50 bg-warn/10 text-warn',
+    bad: 'border-bad/50 bg-bad/10 text-bad',
+    mute: 'border-white/20 bg-white/5 text-ink2'
   };
 </script>
 
-<span class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-sm font-medium {warna[tone]}">
-  <span aria-hidden="true">{icon}</span>{label}
+<span class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm font-semibold {warna[tone]}">
+  {#if nama}<Ikon {nama} />{/if}{label}
 </span>

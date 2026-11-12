@@ -3,14 +3,20 @@
 import { getTelemetry, getThresholds, getAlerts } from './api.js';
 import { ageSeconds } from './format.js';
 
+const KUNCI_NOTIF = 'notif_aktif';
+function bacaPref() {
+  try { return localStorage.getItem(KUNCI_NOTIF) !== '0'; } catch { return true; }
+}
+
 export const live = $state({
   data: null,
   error: '',
   now: Date.now(), // jam yang sudah dikoreksi dengan jam server (kalau server_time tersedia)
   offset: 0,
-  thresholds: { temp_min: 36.5, temp_max: 38.5, stale_seconds: 15 },
+  thresholds: { temp_min: 36.5, temp_max: 38.5, hum_min: 45, hum_max: 70, stale_seconds: 15 },
   alerts: [],
-  izin: 'unsupported' // izin notifikasi browser: default | granted | denied | unsupported
+  izin: 'unsupported', // izin notifikasi browser: default | granted | denied | unsupported
+  notifAktif: bacaPref() // pilihan operator: notifikasi dinyalakan atau dimatikan (disimpan di browser ini)
 });
 
 let timers = [];
@@ -23,7 +29,7 @@ function bacaIzin() {
 }
 
 function beritahu(judul, isi, tag) {
-  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+  if (!live.notifAktif || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
   try { new Notification(judul, { body: isi, tag }); } catch { /* abaikan */ }
 }
 
@@ -56,7 +62,7 @@ async function muatAlerts() {
     for (const x of aktif) {
       if (!alertTerlihat.has(x.id)) {
         alertTerlihat.add(x.id);
-        beritahu(x.severity === 'high' ? '⚠ Peringatan penting' : 'Peringatan inkubator', x.message, 'alert-' + x.id);
+        beritahu(x.severity === 'high' ? 'Peringatan penting' : 'Peringatan inkubator', x.message, 'alert-' + x.id);
       }
     }
   } catch { /* gagal sesaat: dicoba lagi 10 detik berikutnya */ }
@@ -106,5 +112,15 @@ export async function aktifkanNotifikasi() {
 }
 
 export function kirimNotifikasiUji() {
-     beritahu('Notifikasi aktif', 'Ini contoh notifikasi dari Smart Hatchery.', 'uji-' + Date.now());
+  beritahu('Notifikasi aktif', 'Ini contoh notifikasi dari Smart Hatchery.', 'uji-' + Date.now());
+}
+
+// Saklar notifikasi (FUN 06): menyalakan juga meminta izin browser kalau belum pernah diminta
+export async function setNotifAktif(nilai) {
+  live.notifAktif = nilai;
+  try { localStorage.setItem(KUNCI_NOTIF, nilai ? '1' : '0'); } catch { /* abaikan */ }
+  if (nilai && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+    try { await Notification.requestPermission(); } catch { /* abaikan */ }
+    bacaIzin();
+  }
 }

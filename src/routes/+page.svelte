@@ -1,10 +1,13 @@
 <script>
-  import { sendCommand, mockScenario } from '$lib/api.js';
+  import Ikon from '$lib/components/Ikon.svelte';
+  import { sendCommand, getHistory, mockScenario } from '$lib/api.js';
   import { live, isStale, umurDetik, refresh } from '$lib/live.svelte.js';
-  import { ageText, sinyalText, durasiText } from '$lib/format.js';
+  import { ageText, ageSeconds, sinyalText, durasiText } from '$lib/format.js';
   import { statusPutar } from '$lib/turning.js';
   import StatusBadge from '$lib/components/StatusBadge.svelte';
   import MetricCard from '$lib/components/MetricCard.svelte';
+  import Gauge from '$lib/components/Gauge.svelte';
+  import LineChart from '$lib/components/LineChart.svelte';
   import TurningCard from '$lib/components/TurningCard.svelte';
   import IncubationCard from '$lib/components/IncubationCard.svelte';
 
@@ -17,11 +20,14 @@
   let skenario = $state('normal');
   let kirimSibuk = $state(false);
   let kirimHasil = $state(null);
+  let riwayat = $state([]);
 
   let data = $derived(live.data);
   let batas = $derived(live.thresholds);
   let kedaluwarsa = $derived(isStale());
   let suhuDalamBatas = $derived(!!data && data.temperature >= batas.temp_min && data.temperature <= batas.temp_max);
+  let punyaBatasLembap = $derived(batas.hum_min != null && batas.hum_max != null);
+  let lembapDalamBatas = $derived(!!data && punyaBatasLembap && data.humidity >= batas.hum_min && data.humidity <= batas.hum_max);
   let wifi = $derived(data?.wifi ?? { connected: false, ssid: '', rssi: null });
   let inc = $derived(data?.incubation ?? { status: 'idle', started_at: null, finish_at: null, stage: null });
   let turning = $derived(data?.turning ?? { status: 'idle', last_turned_at: null, next_turning_at: null });
@@ -31,6 +37,20 @@
   // Peringatan aktif berasal dari backend (GET /alerts)
   let peringatan = $derived(live.alerts.filter((a) => a.status === 'active').map((a) => a.message));
   let aktuatorBermasalah = $derived(!!data && turning.status === 'fault');
+
+  // Grafik suhu 6 jam terakhir, diperbarui tiap menit
+  async function muatRiwayat() {
+    try {
+      const to = new Date();
+      const from = new Date(to.getTime() - 6 * 3600 * 1000);
+      riwayat = await getHistory({ from: from.toISOString(), to: to.toISOString(), maxPoints: 90 });
+    } catch { /* grafik kosong, bagian lain tetap jalan */ }
+  }
+  $effect(() => {
+    muatRiwayat();
+    const id = setInterval(muatRiwayat, 60000);
+    return () => clearInterval(id);
+  });
 
   function gantiSkenario() {
     mockScenario.value = skenario;
@@ -52,23 +72,23 @@
 
   function modeNote(x) {
     if (x.mode !== 'auto') return 'Manual';
-    return x.fuzzy_active ? '⚙ Otomatis (Fuzzy)' : 'Otomatis';
+    return x.fuzzy_active ? 'Otomatis (Fuzzy)' : 'Otomatis';
   }
 </script>
 
-<h1 class="text-2xl font-semibold">Dashboard</h1>
+<h1 class="text-xl font-bold sm:text-2xl">Dashboard</h1>
 
 {#if live.error}
-  <p class="mt-4 rounded border border-red-700 bg-red-100 p-3 text-red-900">
-    ⚠ Gagal memuat data terbaru: {live.error}. Tampilan di bawah bisa sudah lama.
+  <p class="mt-4 rounded-xl border border-bad/60 bg-bad/10 p-3 text-bad">
+    <Ikon nama="bahaya" /> Gagal memuat data terbaru: {live.error}. Tampilan di bawah bisa sudah lama.
   </p>
 {/if}
 
 {#if !data}
-  {#if !live.error}<p class="mt-4 text-slate-600">Memuat data…</p>{/if}
+  {#if !live.error}<p class="mt-4 text-mute">Memuat data…</p>{/if}
 {:else}
-  <!-- Pertanyaan utama (DES 01): data baru? suhu dalam batas? peringatan? aktuator, putar, Wi-Fi, inkubasi sesuai? -->
-  <div class="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-slate-300 bg-white p-4">
+  <!-- Pertanyaan utama (DES 01): data baru? suhu dan kelembapan dalam batas? peringatan? aktuator? Wi-Fi? -->
+  <div class="kartu mt-4 flex flex-wrap items-center gap-3 p-4">
     {#if kedaluwarsa}
       <StatusBadge tone="warn" icon="⏱" label="Data kedaluwarsa" />
       <StatusBadge tone="mute" icon="?" label="Suhu belum pasti" />
@@ -78,6 +98,13 @@
         <StatusBadge tone="ok" icon="✓" label="Suhu dalam batas" />
       {:else}
         <StatusBadge tone="bad" icon="⚠" label="Suhu di luar batas" />
+      {/if}
+      {#if punyaBatasLembap}
+        {#if lembapDalamBatas}
+          <StatusBadge tone="ok" icon="✓" label="Kelembapan dalam batas" />
+        {:else}
+          <StatusBadge tone="bad" icon="⚠" label="Kelembapan di luar batas" />
+        {/if}
       {/if}
     {/if}
 
@@ -99,17 +126,17 @@
       <StatusBadge tone="bad" icon="⚠" label="Wi-Fi terputus" />
     {/if}
 
-    <span class="ml-auto text-sm text-slate-600">Pembaruan terakhir: {ageText(umurDetik())}</span>
+    <span class="ml-auto text-sm text-mute">Pembaruan terakhir: {ageText(umurDetik())}</span>
   </div>
 
   {#if peringatan.length > 0}
-    <ul class="mt-3 space-y-1 rounded-lg border border-red-700 bg-red-50 p-3 text-sm text-red-900">
-      {#each peringatan as teks}<li>⚠ {teks}</li>{/each}
+    <ul class="mt-3 space-y-1 rounded-xl border border-bad/60 bg-bad/10 p-3 text-sm text-bad">
+      {#each peringatan as teks}<li><Ikon nama="bahaya" /> {teks}</li>{/each}
     </ul>
   {/if}
 
-  {#if live.izin === 'default'}
-    <p class="mt-3 text-sm text-slate-600">🔔 Notifikasi peringatan belum aktif. <a href="/pengaturan" class="underline">Aktifkan di Pengaturan</a>.</p>
+  {#if live.izin === 'default' && live.notifAktif}
+    <p class="mt-3 text-sm text-mute"><Ikon nama="bel" /> Notifikasi peringatan belum diizinkan browser. <a href="/pengaturan" class="underline">Atur di Pengaturan</a>.</p>
   {/if}
 
   <div class="mt-4">
@@ -117,28 +144,44 @@
   </div>
 
   {#if dc}
-    <section class="mt-4 rounded-lg border border-slate-300 bg-white p-4 {kedaluwarsa ? 'opacity-60' : ''}">
+    <section class="kartu mt-4 p-4 {kedaluwarsa ? 'opacity-60' : ''}">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <h2 class="text-lg font-semibold">Kondisi alat</h2>
         <StatusBadge tone={dc.tone} icon={dc.icon} label={dc.label} />
       </div>
       <p class="mt-2 text-sm">{data.device_condition.summary}</p>
       {#if data.device_condition.uptime_seconds > 0}
-        <p class="mt-1 text-sm text-slate-600">Menyala terus selama {durasiText(data.device_condition.uptime_seconds)}</p>
+        <p class="mt-1 text-sm text-mute">Menyala terus selama {durasiText(data.device_condition.uptime_seconds)}</p>
       {/if}
     </section>
   {/if}
 
   <h2 class="mt-6 text-lg font-semibold">Kondisi inkubator</h2>
   <div class="mt-2 grid grid-cols-2 gap-3 md:grid-cols-3">
-    <MetricCard title="Suhu" value={data.temperature} unit="°C"
-      note={kedaluwarsa ? 'Data lama' : data.target_temperature != null ? `Target ${data.target_temperature}°C` : ''} old={kedaluwarsa} />
-    <MetricCard title="Kelembapan (pengaman)" value={data.humidity} unit="%" note={kedaluwarsa ? 'Data lama' : 'Indikator pengaman, tanpa target'} old={kedaluwarsa} />
-    <MetricCard title="Lampu" value={data.lamp.intensity} unit="%" note={modeNote(data.lamp)} old={kedaluwarsa} />
-    <MetricCard title="Ventilasi" value={data.ventilation.angle} unit="°" note={modeNote(data.ventilation)} old={kedaluwarsa} />
-    <MetricCard title="Status putar" value={statusPutar[turning.status]?.label ?? '—'} note={motor.running ? 'Motor berputar' : 'Motor berhenti'} old={kedaluwarsa} />
-    <MetricCard title="Wi-Fi" value={wifi.connected ? wifi.ssid : 'Terputus'} note={wifi.connected ? `Sinyal ${sinyalText(wifi.rssi)}` : 'Perangkat tidak terhubung'} old={kedaluwarsa} />
+    <Gauge title="Suhu" ikon="suhu" value={data.temperature} unit="°C" min={30} max={45} target={data.target_temperature}
+      okMin={batas.temp_min} okMax={batas.temp_max} desimal={1} old={kedaluwarsa} />
+    <Gauge title="Kelembapan" ikon="lembap" value={data.humidity} unit="%" min={0} max={100} target={data.target_humidity ?? null}
+      okMin={punyaBatasLembap ? batas.hum_min : null} okMax={punyaBatasLembap ? batas.hum_max : null} desimal={0} old={kedaluwarsa} />
+    <MetricCard title="Lampu" ikon="lampu" value={data.lamp.intensity} unit="%" persen={data.lamp.intensity} skala="panas" old={kedaluwarsa}
+      baris={[{ label: 'Mode', nilai: modeNote(data.lamp) }, { label: 'Skala', nilai: '0% mati, 100% terang' }]} />
+    <MetricCard title="Ventilasi" ikon="angin" value={data.ventilation.angle} unit="°" persen={(data.ventilation.angle / 90) * 100} skala="angin" old={kedaluwarsa}
+      baris={[{ label: 'Mode', nilai: modeNote(data.ventilation) }, { label: 'Skala', nilai: '0° tutup, 90° buka' }]} />
+    <MetricCard title="Status putar" ikon="putar" status={{ label: statusPutar[turning.status]?.label ?? '—', icon: statusPutar[turning.status]?.icon ?? 'info', tone: statusPutar[turning.status]?.tone ?? 'mute' }} old={kedaluwarsa}
+      baris={[{ label: 'Motor pembalik', nilai: motor.running ? 'Berputar' : 'Berhenti' }, { label: 'Terakhir membalik', nilai: turning.last_turned_at ? ageText(ageSeconds(turning.last_turned_at, live.now)) : '—' }]} />
+    <MetricCard title="Wi-Fi" ikon="wifi" status={wifi.connected ? { label: 'Terhubung', icon: 'wifi', tone: 'ok' } : { label: 'Terputus', icon: 'wifi', tone: 'bad' }} old={kedaluwarsa}
+      baris={[{ label: 'Nama jaringan', nilai: wifi.connected ? wifi.ssid : '—' }, { label: 'Kekuatan sinyal', nilai: wifi.connected ? sinyalText(wifi.rssi).replace(/^./, (c) => c.toUpperCase()) : '—' }]} />
   </div>
+
+  <section class="kartu mt-4 p-4">
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <h2 class="text-lg font-semibold">Grafik suhu (6 jam terakhir)</h2>
+      <a href="/grafik" class="text-sm font-medium underline">Lihat semua grafik dan evaluasi stabilitas <Ikon nama="kanan" /></a>
+    </div>
+    <div class="mt-3">
+      <LineChart points={riwayat.map((p) => ({ t: p.t, v: p.temperature }))} label="Suhu" unit="°C"
+        target={data.target_temperature} bandMin={batas.temp_min} bandMax={batas.temp_max} desimal={2} spanMs={6 * 3600 * 1000} />
+    </div>
+  </section>
 
   <h2 class="mt-6 text-lg font-semibold">Pembalikan telur</h2>
   <div class="mt-2 md:max-w-md">
@@ -147,9 +190,9 @@
 {/if}
 
 {#if import.meta.env.DEV && import.meta.env.VITE_USE_MOCK !== 'false'}
-  <div class="mt-8 rounded border border-dashed border-slate-500 p-3 text-sm text-slate-700">
+  <div class="mt-8 rounded-xl border border-dashed border-line p-3 text-sm text-ink2">
     Mode pengembangan, skenario data dummy:
-    <select bind:value={skenario} onchange={gantiSkenario} class="ml-2 rounded border border-slate-400 bg-white px-2 py-1">
+    <select bind:value={skenario} onchange={gantiSkenario} class="input-kecil ml-2">
       <option value="normal">Normal</option>
       <option value="stale">Data kedaluwarsa</option>
       <option value="alert">Peringatan</option>

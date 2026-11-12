@@ -1,211 +1,151 @@
 <script>
+  import Ikon from '$lib/components/Ikon.svelte';
   import {
-    getSettings, getLimits,
-    saveTargetTemperature, saveMotorSettings, saveWifi
+    getSettings, getLimits, saveTargetTemperature, saveTargetHumidity, saveMotorSettings, saveWifi
   } from '$lib/api.js';
-  import { live, isStale, aktifkanNotifikasi, kirimNotifikasiUji } from '$lib/live.svelte.js';
+  import { live, isStale, aktifkanNotifikasi, kirimNotifikasiUji, setNotifAktif } from '$lib/live.svelte.js';
+  import TargetForm from '$lib/components/TargetForm.svelte';
 
   let settings = $state(null);
   let limits = $state(null);
   let error = $state('');
 
-  // Isian di layar (draft). Baru dikirim saat tombol ditekan
-  let target = $state(37.5);
-  let motor = $state({ interval_minutes: 120, duration_seconds: 20, speed_percent: 50 });
+  // Wi-Fi
   let ssid = $state('');
   let sandi = $state('');
   let lihatSandi = $state(false);
   let konfirmasiWifi = $state(false);
-
-  let sibuk = $state({});
-  let hasil = $state({});
-
-  const kolomMotor = [
-    { key: 'interval_minutes', label: 'Interval pembalikan', unit: 'menit' },
-    { key: 'duration_seconds', label: 'Durasi putar', unit: 'detik' },
-    { key: 'speed_percent', label: 'Kecepatan motor', unit: '%' }
-  ];
+  let wifiSibuk = $state(false);
+  let wifiHasil = $state(null);
 
   $effect(() => {
     Promise.all([getSettings(), getLimits()]).then(([s, l]) => {
-      settings = s; limits = l;
-      target = s.target_temperature;
-      motor = { ...s.motor };
-      ssid = s.wifi.ssid;
+      settings = s; limits = l; ssid = s.wifi.ssid;
     }).catch((e) => (error = e.message));
   });
 
-  let data = $derived(live.data); // telemetri bersama, untuk tahu perangkat terhubung atau tidak
+  let data = $derived(live.data);
   let kedaluwarsa = $derived(isStale());
   let terkunci = $derived(!data || kedaluwarsa);
 
-  async function jalankan(kunci, fn, pesanOk) {
-    sibuk[kunci] = true; hasil[kunci] = null;
-    try {
-      await fn();
-      hasil[kunci] = { ok: true, teks: pesanOk };
-      return true;
-    } catch (e) {
-      hasil[kunci] = { ok: false, teks: `Gagal mengirim: ${e.message}` };
-      return false;
-    } finally {
-      sibuk[kunci] = false;
-    }
-  }
-
-  function salah(kunci, teks) { hasil[kunci] = { ok: false, teks }; }
-
-  async function simpanTarget() {
-    hasil.target = null;
-    const v = Number(target);
-    const b = limits.target_temperature;
-    if (target === '' || !Number.isFinite(v)) return salah('target', 'Isi target suhu dengan angka.');
-    if (v < b.min || v > b.max) return salah('target', `Target suhu harus antara ${b.min} dan ${b.max} °C.`);
-    if (await jalankan('target', () => saveTargetTemperature(v), `Target suhu ${v}°C terkirim ke perangkat.`)) {
-      settings.target_temperature = v;
-    }
-  }
-
-  async function simpanMotor() {
-    hasil.motor = null;
-    const baru = {};
-    for (const k of kolomMotor) {
-      const v = Number(motor[k.key]);
-      const b = limits.motor[k.key];
-      if (motor[k.key] === '' || !Number.isInteger(v)) return salah('motor', `${k.label}: isi dengan bilangan bulat.`);
-      if (v < b.min || v > b.max) return salah('motor', `${k.label} harus antara ${b.min} dan ${b.max} ${k.unit}.`);
-      baru[k.key] = v;
-    }
-    if (await jalankan('motor', () => saveMotorSettings(baru), 'Pengaturan motor terkirim ke perangkat.')) {
-      settings.motor = baru;
-    }
-  }
+  async function simpanSuhu(v) { await saveTargetTemperature(v); settings.target_temperature = v; }
+  async function simpanLembap(v) { await saveTargetHumidity(v); settings.target_humidity = v; }
+  async function simpanMotor(v) { await saveMotorSettings({ interval_minutes: v }); settings.motor.interval_minutes = v; }
 
   function periksaWifi() {
-    hasil.wifi = null;
+    wifiHasil = null;
     const nama = ssid.trim();
-    if (nama.length < 1 || nama.length > 32) return salah('wifi', 'Nama Wi-Fi (SSID) harus 1–32 karakter.');
-    if (sandi.length < 8 || sandi.length > 63) return salah('wifi', 'Kata sandi Wi-Fi harus 8–63 karakter.');
+    if (nama.length < 1 || nama.length > 32) { wifiHasil = { ok: false, teks: 'Nama Wi-Fi (SSID) harus 1–32 karakter.' }; return; }
+    if (sandi.length < 8 || sandi.length > 63) { wifiHasil = { ok: false, teks: 'Kata sandi Wi-Fi harus 8–63 karakter.' }; return; }
     konfirmasiWifi = true;
   }
 
   async function kirimWifi() {
     konfirmasiWifi = false;
+    wifiSibuk = true; wifiHasil = null;
     const nama = ssid.trim();
-    const ok = await jalankan('wifi', () => saveWifi({ ssid: nama, password: sandi }),
-      'Terkirim ke perangkat. Perangkat mencoba tersambung ke jaringan baru maksimal 30 detik. Jika gagal, otomatis kembali ke Wi-Fi lama dan muncul peringatan komunikasi.');
-    sandi = ''; // kata sandi tidak disimpan di layar
-    lihatSandi = false;
-    if (ok) settings.wifi.ssid = nama;
+    try {
+      await saveWifi({ ssid: nama, password: sandi });
+      settings.wifi.ssid = nama;
+      wifiHasil = { ok: true, teks: 'Terkirim ke perangkat. Perangkat mencoba tersambung ke jaringan baru maksimal 30 detik. Jika gagal, otomatis kembali ke Wi-Fi lama dan muncul peringatan komunikasi.' };
+    } catch (e) {
+      wifiHasil = { ok: false, teks: `Gagal mengirim: ${e.message}` };
+    } finally {
+      wifiSibuk = false;
+      sandi = ''; // kata sandi tidak disimpan di layar
+      lihatSandi = false;
+    }
   }
 </script>
 
-<h1 class="text-2xl font-semibold">Pengaturan</h1>
+<h1 class="text-xl font-bold sm:text-2xl">Pengaturan</h1>
 
 {#if error}
-  <p class="mt-4 rounded border border-red-700 bg-red-100 p-3 text-red-900">⚠ Gagal memuat data: {error}. Muat ulang halaman.</p>
+  <p class="mt-4 rounded-xl border border-bad/60 bg-bad/10 p-3 text-bad"><Ikon nama="bahaya" /> Gagal memuat data: {error}. Muat ulang halaman.</p>
 {:else if !data || !settings || !limits}
-  <p class="mt-4 text-slate-600">Memuat pengaturan…</p>
+  <p class="mt-4 text-mute">Memuat pengaturan…</p>
 {:else}
   {#if terkunci}
-    <p class="mt-4 rounded border border-amber-700 bg-amber-100 p-3 text-amber-900">
-      ⏱ Pengaturan dinonaktifkan karena data kedaluwarsa atau perangkat terputus. Perubahan tidak dikirim ke perangkat yang tidak merespons.
+    <p class="mt-4 rounded-xl border border-warn/60 bg-warn/10 p-3 text-warn">
+      <Ikon nama="jam" /> Pengaturan alat dinonaktifkan karena data kedaluwarsa atau perangkat terputus. Perubahan tidak dikirim ke perangkat yang tidak merespons.
     </p>
   {/if}
 
   <div class="mt-4 grid gap-4 md:grid-cols-2">
-    <!-- TARGET SUHU -->
-    <section class="rounded-lg border border-slate-300 bg-white p-4">
-      <h2 class="text-lg font-semibold">Target suhu</h2>
-      <p class="mt-1 text-sm text-slate-600">Saat ini: {settings.target_temperature}°C. Kelembapan hanya indikator pengaman, tidak punya target.</p>
-      <fieldset class="mt-3" disabled={terkunci}>
-        <label for="target" class="block text-sm font-medium">Target suhu (°C)</label>
-        <input id="target" type="number" step="0.1" bind:value={target} class="mt-1 w-full rounded border border-slate-400 px-3 py-2" />
-        <p class="mt-1 text-sm text-slate-600">Batas yang diizinkan: {limits.target_temperature.min}–{limits.target_temperature.max} °C</p>
-        <button type="button" onclick={simpanTarget} disabled={terkunci || sibuk.target}
-          class="mt-4 rounded bg-slate-900 px-4 py-2 text-white disabled:cursor-not-allowed disabled:opacity-40">
-          {sibuk.target ? 'Mengirim…' : 'Simpan target'}
-        </button>
-      </fieldset>
-      {#if hasil.target}<p role="status" class="mt-2 text-sm {hasil.target.ok ? 'text-emerald-900' : 'text-red-900'}">{hasil.target.ok ? '✓' : '⚠'} {hasil.target.teks}</p>{/if}
-    </section>
-
-    <!-- MOTOR DC -->
-    <section class="rounded-lg border border-slate-300 bg-white p-4">
-      <h2 class="text-lg font-semibold">Motor DC (pembalikan telur)</h2>
-      <p class="mt-1 text-sm text-slate-600">Nilai hanya bisa diubah dalam batas yang diizinkan.</p>
-      <fieldset class="mt-3 space-y-3" disabled={terkunci}>
-        {#each kolomMotor as k}
-          <div>
-            <label for={'m-' + k.key} class="block text-sm font-medium">{k.label} ({k.unit})</label>
-            <input id={'m-' + k.key} type="number" step="1" bind:value={motor[k.key]} class="mt-1 w-full rounded border border-slate-400 px-3 py-2" />
-            <p class="mt-1 text-sm text-slate-600">Saat ini {settings.motor[k.key]} · batas {limits.motor[k.key].min}–{limits.motor[k.key].max} {k.unit}</p>
-          </div>
-        {/each}
-        <button type="button" onclick={simpanMotor} disabled={terkunci || sibuk.motor}
-          class="rounded bg-slate-900 px-4 py-2 text-white disabled:cursor-not-allowed disabled:opacity-40">
-          {sibuk.motor ? 'Mengirim…' : 'Simpan pengaturan motor'}
-        </button>
-      </fieldset>
-      {#if hasil.motor}<p role="status" class="mt-2 text-sm {hasil.motor.ok ? 'text-emerald-900' : 'text-red-900'}">{hasil.motor.ok ? '✓' : '⚠'} {hasil.motor.teks}</p>{/if}
-    </section>
+    <TargetForm judul="Target suhu" label="Target suhu" unit="°C" step={0.1}
+      saatIni={settings.target_temperature} batas={limits.target_temperature} {terkunci} onsimpan={simpanSuhu} />
+    {#if settings.target_humidity != null && limits.target_humidity}
+      <TargetForm judul="Target kelembapan" label="Target kelembapan" unit="%" step={1}
+        saatIni={settings.target_humidity} batas={limits.target_humidity} {terkunci} onsimpan={simpanLembap} />
+    {/if}
+    <TargetForm judul="Interval pembalikan telur" label="Interval pembalikan" unit="menit" step={1} bulat
+      saatIni={settings.motor.interval_minutes} batas={limits.motor.interval_minutes} {terkunci}
+      bantuan="Jarak waktu antar pembalikan" onsimpan={simpanMotor} />
   </div>
 
   <!-- WI-FI -->
-  <section class="mt-4 rounded-lg border border-slate-300 bg-white p-4 md:max-w-xl">
+  <section class="kartu mt-4 p-4 md:max-w-xl">
     <h2 class="text-lg font-semibold">Wi-Fi perangkat</h2>
-    <p class="mt-1 text-sm text-slate-600">
+    <p class="mt-1 text-sm text-mute">
       Jaringan saat ini: {data.wifi?.connected ? data.wifi.ssid : 'terputus'}. Kata sandi tidak pernah ditampilkan kembali setelah dikirim.
     </p>
-    <fieldset class="mt-3 space-y-3" disabled={terkunci || sibuk.wifi}>
+    <fieldset class="mt-3 space-y-3" disabled={terkunci || wifiSibuk}>
       <div>
         <label for="ssid" class="block text-sm font-medium">Nama Wi-Fi (SSID)</label>
-        <input id="ssid" bind:value={ssid} autocomplete="off" class="mt-1 w-full rounded border border-slate-400 px-3 py-2" />
+        <input id="ssid" bind:value={ssid} autocomplete="off" class="input mt-1" />
       </div>
       <div>
         <label for="sandi" class="block text-sm font-medium">Kata sandi Wi-Fi</label>
         <div class="mt-1 flex gap-2">
-          <input id="sandi" type={lihatSandi ? 'text' : 'password'} bind:value={sandi} autocomplete="new-password" placeholder="Isi untuk mengganti"
-            class="w-full rounded border border-slate-400 px-3 py-2" />
-          <button type="button" onclick={() => (lihatSandi = !lihatSandi)} class="whitespace-nowrap rounded border border-slate-400 px-3 text-sm">
+          <input id="sandi" type={lihatSandi ? 'text' : 'password'} bind:value={sandi} autocomplete="new-password" placeholder="Isi untuk mengganti" class="input" />
+          <button type="button" onclick={() => (lihatSandi = !lihatSandi)} class="tombol tombol-sekunder tombol-kecil whitespace-nowrap">
             {lihatSandi ? 'Sembunyikan' : 'Tampilkan'}
           </button>
         </div>
       </div>
 
       {#if konfirmasiWifi}
-        <div class="rounded border border-red-700 bg-red-50 p-3 text-sm text-red-900">
-          <p class="font-medium">⚠ Kirim pengaturan Wi-Fi ke perangkat?</p>
+        <div class="rounded-xl border border-bad/60 bg-bad/10 p-3 text-sm text-bad">
+          <p class="font-medium"><Ikon nama="bahaya" /> Kirim pengaturan Wi-Fi ke perangkat?</p>
           <p class="mt-1">Perangkat akan mencoba tersambung ke <strong>{ssid.trim()}</strong> maksimal 30 detik, dan data bisa terputus sebentar. Jika gagal, perangkat otomatis kembali ke Wi-Fi lama dan muncul peringatan komunikasi.</p>
           <div class="mt-3 flex gap-2">
-            <button type="button" onclick={kirimWifi} class="rounded bg-red-800 px-4 py-2 text-white">Ya, kirim</button>
-            <button type="button" onclick={() => (konfirmasiWifi = false)} class="rounded border border-slate-400 bg-white px-4 py-2 text-slate-900">Batal</button>
+            <button type="button" onclick={kirimWifi} class="tombol tombol-bahaya">Ya, kirim</button>
+            <button type="button" onclick={() => (konfirmasiWifi = false)} class="tombol tombol-sekunder">Batal</button>
           </div>
         </div>
       {:else}
-        <button type="button" onclick={periksaWifi} disabled={terkunci || sibuk.wifi}
-          class="rounded bg-slate-900 px-4 py-2 text-white disabled:cursor-not-allowed disabled:opacity-40">
-          {sibuk.wifi ? 'Mengirim…' : 'Kirim ke perangkat'}
+        <button type="button" onclick={periksaWifi} disabled={terkunci || wifiSibuk} class="tombol">
+          {wifiSibuk ? 'Mengirim…' : 'Kirim ke perangkat'}
         </button>
       {/if}
     </fieldset>
-    {#if hasil.wifi}<p role="status" class="mt-2 text-sm {hasil.wifi.ok ? 'text-emerald-900' : 'text-red-900'}">{hasil.wifi.ok ? '✓' : '⚠'} {hasil.wifi.teks}</p>{/if}
+    {#if wifiHasil}<p role="status" class="mt-2 text-sm {wifiHasil.ok ? 'text-good' : 'text-bad'}"><Ikon nama={wifiHasil.ok ? 'ok' : 'bahaya'} /> {wifiHasil.teks}</p>{/if}
   </section>
 
-  <!-- NOTIFIKASI -->
-  <section class="mt-4 rounded-lg border border-slate-300 bg-white p-4 md:max-w-xl">
+  <!-- NOTIFIKASI (saklar nyala/mati) -->
+  <section class="kartu mt-4 p-4 md:max-w-xl">
     <h2 class="text-lg font-semibold">Notifikasi peringatan</h2>
-    <p class="mt-1 text-sm text-slate-600">Notifikasi browser muncul saat ada peringatan baru dan saat inkubasi selesai, selama halaman ini terbuka atau diminimalkan.</p>
-    {#if live.izin === 'granted'}
-      <p class="mt-3 text-sm text-emerald-900">✓ Notifikasi aktif di browser ini.</p>
-      <button type="button" onclick={kirimNotifikasiUji} class="mt-2 rounded border border-slate-400 px-4 py-2 text-sm">Kirim notifikasi uji</button>
+    <p class="mt-1 text-sm text-mute">Notifikasi browser muncul saat ada peringatan baru dan saat inkubasi selesai, selama halaman ini terbuka atau diminimalkan.</p>
+
+    <div class="mt-4 flex items-center gap-4">
+      <button type="button" role="switch" aria-checked={live.notifAktif} aria-label="Notifikasi peringatan" class="saklar"
+        onclick={() => setNotifAktif(!live.notifAktif)}></button>
+      <span class="text-lg font-semibold">{live.notifAktif ? 'Aktif' : 'Nonaktif'}</span>
+    </div>
+
+    {#if !live.notifAktif}
+      <p class="mt-3 text-sm text-ink2">Notifikasi dimatikan. Peringatan tetap tampil di halaman Dashboard dan Peringatan.</p>
+    {:else if live.izin === 'granted'}
+      <p class="mt-3 text-sm text-good"><Ikon nama="ok" /> Notifikasi akan muncul di browser ini.</p>
+      <button type="button" onclick={kirimNotifikasiUji} class="tombol tombol-sekunder mt-2">Kirim notifikasi uji</button>
     {:else if live.izin === 'denied'}
-      <p class="mt-3 text-sm text-red-900">⚠ Notifikasi diblokir. Klik ikon gembok di sebelah alamat web, lalu izinkan Notifikasi.</p>
+      <p class="mt-3 text-sm text-bad"><Ikon nama="bahaya" /> Notifikasi diblokir browser. Klik ikon gembok di sebelah alamat web, lalu izinkan Notifikasi.</p>
     {:else if live.izin === 'unsupported'}
-      <p class="mt-3 text-sm text-slate-600">Browser ini tidak mendukung notifikasi.</p>
+      <p class="mt-3 text-sm text-ink2">Browser ini tidak mendukung notifikasi.</p>
     {:else}
-      <button type="button" onclick={aktifkanNotifikasi} class="mt-3 rounded bg-slate-900 px-4 py-2 text-white">Aktifkan notifikasi</button>
+      <p class="mt-3 text-sm text-ink2">Browser belum memberi izin.</p>
+      <button type="button" onclick={aktifkanNotifikasi} class="tombol mt-2">Izinkan di browser</button>
     {/if}
-    <p class="mt-2 text-sm text-slate-600">Peringatan penting juga dikirim lewat Telegram oleh server.</p>
+    <p class="mt-3 text-sm text-mute">Pilihan ini tersimpan di browser ini saja. Peringatan penting juga dikirim lewat Telegram oleh server (opsional).</p>
   </section>
 {/if}
