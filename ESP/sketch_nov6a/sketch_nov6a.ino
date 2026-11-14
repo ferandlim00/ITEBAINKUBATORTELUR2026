@@ -26,6 +26,7 @@
 #include <esp_arduino_version.h>
 #include <soc/gpio_struct.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <Preferences.h>
 #include <Wire.h>
@@ -1263,7 +1264,15 @@ void sendTelemetryAndPollBackend() {
   serializeJson(doc, payload);
 
   HTTPClient http;
-  http.begin(BACKEND_TELEMETRY_URL);
+  WiFiClientSecure secureClient;
+  String targetUrl = String(BACKEND_TELEMETRY_URL);
+  if (targetUrl.startsWith("https://")) {
+    // Mendukung HTTPS (misalnya Tailscale Funnel: https://nama-vps.tailxxxx.ts.net/api/device/telemetry)
+    secureClient.setInsecure();
+    http.begin(secureClient, targetUrl);
+  } else {
+    http.begin(targetUrl);
+  }
   http.setTimeout(3500);
   http.addHeader("Content-Type", "application/json");
   http.addHeader("X-Device-Key", DEVICE_API_KEY);

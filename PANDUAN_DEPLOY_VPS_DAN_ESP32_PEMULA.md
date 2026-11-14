@@ -25,6 +25,54 @@ flowchart LR
 
 ---
 
+## KHUSUS PENGGUNA TAILSCALE: Cara Menghubungkan VPS & ESP32
+
+Jika VPS Anda menggunakan **Tailscale** (yang memiliki IP berawalan `100.x.y.z`, misalnya `100.85.12.34`), ada **1 Fakta Penting** yang wajib Anda ketahui:
+
+> **Papan mikrokontroler ESP32 TIDAK BISA diinstal aplikasi Tailscale di dalamnya.**
+> Artinya, jika ESP32 hanya nyambung ke Wi-Fi rumah/Hotspot HP biasa, ESP32 **tidak kenal** alamat IP Tailscale `100.x.y.z`!
+
+Supaya **ESP32 tetap bisa mengirim data ke VPS Tailscale Anda**, pilih **salah satu dari 2 cara super mudah** di bawah ini:
+
+### Cara A (Paling Direkomendasikan jika VPS tidak punya IP Public): Pakai **Tailscale Funnel**
+Tailscale punya fitur gratis bernama **Funnel** yang membuatkan pintu alamat internet resmi (`https://nama-vps.tailxxxx.ts.net`) menuju VPS Anda sehingga **ESP32 bisa masuk tanpa perlu aplikasi Tailscale**.
+
+1. **Aktifkan HTTPS & Funnel di Dashboard Tailscale Anda (Sekali Saja):**
+   - Buka [https://login.tailscale.com/admin/dns](https://login.tailscale.com/admin/dns) $\rightarrow$ pastikan **MagicDNS** aktif dan klik **Enable HTTPS**.
+   - Buka tab **Access Controls (ACL)** di web Tailscale, pastikan ada izin `funnel` (biasanya sudah ada atau klik *Add Funnel policy*).
+2. **Di Terminal VPS Anda, ketik 1 perintah ini:**
+   ```bash
+   tailscale funnel --bg 80
+   ```
+   Terminal akan memunculkan alamat seperti:
+   `https://nama-vps.tail12345.ts.net/`
+3. **Di File `.env` VPS (`/opt/smart-hatchery/.env`), isi `CORS_ALLOW_ORIGINS` dengan:**
+   ```env
+   CORS_ALLOW_ORIGINS=http://100.85.12.34,https://nama-vps.tail12345.ts.net
+   ```
+   *(Ganti `100.85.12.34` dengan IP Tailscale VPS Anda, dan `https://nama-vps.tail12345.ts.net` dengan alamat Funnel Anda, lalu jalankan `docker compose up -d`).*
+4. **Di Kodingan Arduino (`sketch_nov6a.ino` Baris 70), isi `BACKEND_TELEMETRY_URL` dengan alamat Funnel tersebut:**
+   ```cpp
+   const char* BACKEND_TELEMETRY_URL = "https://nama-vps.tail12345.ts.net/api/device/telemetry";
+   ```
+   *(Kodingan `sketch_nov6a.ino` sudah dilengkapi `WiFiClientSecure` sehingga langsung mendukung `https://` Tailscale Funnel!).*
+
+---
+
+### Cara B (Jika VPS Anda Punya IP Public Sekaligus Tailscale)
+Jika VPS Anda adalah VPS Cloud biasa (seperti Biznet Gio, IDCloudHost, DigitalOcean, Vultr, Contabo) yang punya **IP Public** (misal `103.150.10.25`) DAN Anda juga memasang **Tailscale** (`100.85.12.34`):
+1. **Untuk Anda (SSH & Buka Web Dashboard):** Anda tetap bebas memakai IP Tailscale **`http://100.85.12.34`**.
+2. **Di File `.env` VPS (`/opt/smart-hatchery/.env`):** Tulis kedua IP di `CORS_ALLOW_ORIGINS` (dipisah koma tanpa spasi):
+   ```env
+   CORS_ALLOW_ORIGINS=http://100.85.12.34,http://103.150.10.25
+   ```
+3. **Khusus di Kodingan Arduino (`sketch_nov6a.ino` Baris 70):** Gunakan **IP Public VPS** agar ESP32 bisa menjangkaunya dari Wi-Fi mana saja:
+   ```cpp
+   const char* BACKEND_TELEMETRY_URL = "http://103.150.10.25/api/device/telemetry";
+   ```
+
+---
+
 ## TAHAP 1: Menyalakan Server di VPS (Di Laptop Anda)
 
 ### Langkah 1.1 — Siapkan 3 Data dari Penyedia VPS
