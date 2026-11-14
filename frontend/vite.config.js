@@ -6,6 +6,6 @@ export default defineConfig({
   plugins: [tailwindcss(), sveltekit()],
   server: {
     // Nanti saat backend Go Fiber jalan di :3000, request /api diteruskan ke sana
-    proxy: { '/api': 'http://localhost:3000' }
+    proxy: { '/api': 'http://127.0.0.1:3000' }
   }
 });
