@@ -39,7 +39,7 @@
   const kecil = $derived(w < 460); // layar sempit: margin, huruf, dan garis dibuat lebih ringkas
   const ML = $derived(kecil ? 40 : 52);
   const MR = $derived(kecil ? 8 : 14);
-  const desTick = desimal > 1 ? 1 : desimal;
+  const desTick = $derived(desimal > 1 ? 1 : desimal);
   let idx = $state(null);
   let jalan = $state(false); // garis mulai tergambar setelah tabir login terbuka
   $effect(() => {
