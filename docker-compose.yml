@@ -1,0 +1,88 @@
+services:
+  # Database MySQL 8.4 (hanya di-bind ke localhost host demi keamanan VPS)
+  mysql:
+    image: mysql:8.4
+    container_name: smart-hatchery-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootsecure123}
+      MYSQL_DATABASE: ${DB_NAME:-smart_hatchery}
+      MYSQL_USER: ${DB_USER:-hatchery_user}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-hatchery_secure_pass}
+    ports:
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - smart-hatchery-net
+    restart: unless-stopped
+
+  # Backend Go Fiber API (diakses lewat reverse proxy Nginx /api/, port 3000 hanya lokal host)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: smart-hatchery-backend
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      APP_PORT: 3000
+      APP_ENV: ${APP_ENV:-production}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-http://localhost,http://localhost:80,http://localhost:3000}
+      STALE_SECONDS: ${STALE_SECONDS:-15}
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: ${DB_USER:-hatchery_user}
+      DB_PASSWORD: ${DB_PASSWORD:-hatchery_secure_pass}
+      DB_NAME: ${DB_NAME:-smart_hatchery}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+      DEVICE_ID: ${DEVICE_ID:-inkubator-01}
+      DEVICE_API_KEY: ${DEVICE_API_KEY:-secret-device-token-esp32}
+      OPERATOR_USERNAME: ${OPERATOR_USERNAME:-operator1}
+      OPERATOR_PASSWORD: ${OPERATOR_PASSWORD:-operator12345}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+    ports:
+      - "127.0.0.1:3000:3000"
+    networks:
+      - smart-hatchery-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Frontend SvelteKit (Nginx + Proxy /api/ -> backend:3000)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: smart-hatchery-frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT_BIND:-80:80}"
+    networks:
+      - smart-hatchery-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  mysql_data:
+
+networks:
+  smart-hatchery-net:
+    driver: bridge

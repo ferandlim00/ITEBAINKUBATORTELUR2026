@@ -1,0 +1,6 @@
+.git
+.gitignore
+.env
+.env.*
+*.exe
+internal/database/schema.sql

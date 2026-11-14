@@ -1,4 +1,25 @@
-node_modules
-.svelte-kit
-build
+# Environment variables & secrets (keep templates)
 .env
+.env.local
+.env.production
+!.env.example
+!.env.docker
+
+# Node / SvelteKit
+node_modules/
+.svelte-kit/
+build/
+
+# Go / Binaries
+*.exe
+*.bin
+bin/
+dist/
+tmp/
+
+# Duplicate frontend clone folder
+inkubator-web/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
