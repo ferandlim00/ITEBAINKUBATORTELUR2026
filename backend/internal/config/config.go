@@ -16,6 +16,7 @@ type Config struct {
 	AppEnv           string
 	CookieSecure     bool
 	CORSAllowOrigins string
+	StaticDir        string
 
 	DBHost     string
 	DBPort     string
@@ -51,16 +52,17 @@ func Load() (*Config, error) {
 	encKey := parseEncryptionKey(rawKey)
 
 	return &Config{
-		AppPort:          getEnv("APP_PORT", "3000"),
+		AppPort:          getEnvFirst([]string{"PORT", "APP_PORT"}, "3000"),
 		AppEnv:           getEnv("APP_ENV", "development"),
 		CookieSecure:     strings.EqualFold(getEnv("COOKIE_SECURE", "false"), "true"),
-		CORSAllowOrigins: getEnv("CORS_ALLOW_ORIGINS", "http://localhost:5173"),
+		CORSAllowOrigins: getEnv("CORS_ALLOW_ORIGINS", "http://localhost:5173,http://localhost:3000,https://itebaincubatortelur.cc.cd"),
+		StaticDir:        getEnv("STATIC_DIR", "./public"),
 
-		DBHost:     getEnv("DB_HOST", "127.0.0.1"),
-		DBPort:     getEnv("DB_PORT", "3306"),
-		DBUser:     getEnv("DB_USER", "root"),
-		DBPassword: getEnv("DB_PASSWORD", ""),
-		DBName:     getEnv("DB_NAME", "smart_hatchery"),
+		DBHost:     getEnvFirst([]string{"DB_HOST", "MYSQLHOST"}, "127.0.0.1"),
+		DBPort:     getEnvFirst([]string{"DB_PORT", "MYSQLPORT"}, "3306"),
+		DBUser:     getEnvFirst([]string{"DB_USER", "MYSQLUSER"}, "root"),
+		DBPassword: getEnvFirst([]string{"DB_PASSWORD", "MYSQLPASSWORD", "MYSQL_ROOT_PASSWORD"}, ""),
+		DBName:     getEnvFirst([]string{"DB_NAME", "MYSQLDATABASE", "MYSQL_DATABASE"}, "smart_hatchery"),
 
 		EncryptionKey: encKey,
 		DeviceID:      getEnv("DEVICE_ID", "inkubator-01"),
@@ -79,6 +81,15 @@ func Load() (*Config, error) {
 func getEnv(key, fallback string) string {
 	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
 		return v
+	}
+	return fallback
+}
+
+func getEnvFirst(keys []string, fallback string) string {
+	for _, k := range keys {
+		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
+			return v
+		}
 	}
 	return fallback
 }

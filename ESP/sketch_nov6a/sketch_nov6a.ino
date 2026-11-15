@@ -65,8 +65,9 @@ const char* DEVICE_ID             = "inkubator-01";
 const char* DEFAULT_WIFI_SSID     = "RNP135G";
 const char* DEFAULT_WIFI_PASS     = "88998899";
 
-// Ganti IP di bawah ini dengan alamat IP komputer/VPS Backend Go Fiber Anda
-const char* BACKEND_TELEMETRY_URL = "http://192.168.1.100:3000/api/device/telemetry";
+// URL Backend Production (Railway + Custom Domain HTTPS)
+// Untuk uji lokal, ganti ke: "http://10.219.140.40:3000/api/device/telemetry"
+const char* BACKEND_TELEMETRY_URL = "https://itebaincubatortelur.cc.cd/api/device/telemetry";
 const char* DEVICE_API_KEY        = "secret-device-token-esp32";
 
 const char* NTP_SERVER_1          = "pool.ntp.org";

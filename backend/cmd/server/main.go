@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -60,7 +61,9 @@ func main() {
 
 	origins := splitOrigins(cfg.CORSAllowOrigins)
 	app.Use(cors.New(cors.Config{
-		AllowOrigins:     origins,
+		AllowOriginsFunc: func(origin string) bool {
+			return isAllowedOrigin(origin, origins)
+		},
 		AllowMethods:     []string{"GET", "POST", "PUT", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "X-Device-Key"},
 		AllowCredentials: true,
@@ -108,6 +111,9 @@ func main() {
 	protected.Put("/settings/motor", settingsHandler.UpdateMotorSettings)
 	protected.Put("/settings/wifi", settingsHandler.UpdateWifiSettings)
 
+	// Sajikan build statis Frontend SvelteKit (SPA) jika folder public/index.html tersedia (mode Railway / Single Container)
+	registerSPAFallback(app, cfg.StaticDir)
+
 	// Background watcher tiap 5 detik untuk mendeteksi perangkat offline > stale_seconds (15 detik)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -152,6 +158,61 @@ func splitOrigins(raw string) []string {
 		return []string{"http://localhost:5173"}
 	}
 	return out
+}
+
+func isAllowedOrigin(origin string, allowed []string) bool {
+	o := strings.TrimSpace(strings.ToLower(origin))
+	if o == "" {
+		return true
+	}
+	for _, a := range allowed {
+		if strings.EqualFold(o, strings.TrimSpace(a)) || a == "*" {
+			return true
+		}
+	}
+	// Izinkan domain bawaan Railway, custom domain .cc.cd, dan jaringan Tailscale (.ts.net)
+	if strings.HasSuffix(o, ".up.railway.app") ||
+		strings.HasSuffix(o, "itebaincubatortelur.cc.cd") ||
+		strings.HasSuffix(o, ".ts.net") {
+		return true
+	}
+	return false
+}
+
+func registerSPAFallback(app *fiber.App, staticDir string) {
+	indexFile := filepath.Join(staticDir, "index.html")
+	info, err := os.Stat(indexFile)
+	if err != nil || info.IsDir() {
+		return
+	}
+	absRoot, err := filepath.Abs(staticDir)
+	if err != nil {
+		return
+	}
+	log.Printf("Menyajikan Frontend SPA dari direktori statis: %s", absRoot)
+
+	app.Use(func(c fiber.Ctx) error {
+		path := c.Path()
+		if path == "/api" || strings.HasPrefix(path, "/api/") {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+				"message": "Endpoint API tidak ditemukan.",
+			})
+		}
+		if c.Method() != fiber.MethodGet && c.Method() != fiber.MethodHead {
+			return c.Next()
+		}
+
+		cleanRel := filepath.Clean(strings.TrimPrefix(path, "/"))
+		if cleanRel != "." && !strings.HasPrefix(cleanRel, "..") {
+			candidate := filepath.Join(absRoot, cleanRel)
+			if st, err := os.Stat(candidate); err == nil && !st.IsDir() {
+				return c.SendFile(candidate)
+			}
+		}
+
+		c.Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		return c.SendFile(filepath.Join(absRoot, "index.html"))
+	})
 }
 
 func warnWeakProductionDefaults(cfg *config.Config) {

@@ -1,0 +1,10 @@
+.git
+**/node_modules
+**/.svelte-kit
+frontend/build
+inkubator-web
+ESP
+*.docx
+.env
+backend/.env
+frontend/.env
