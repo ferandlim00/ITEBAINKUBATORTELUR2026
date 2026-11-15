@@ -170,10 +170,12 @@ func isAllowedOrigin(origin string, allowed []string) bool {
 			return true
 		}
 	}
-	// Izinkan domain bawaan Railway, custom domain .cc.cd, dan jaringan Tailscale (.ts.net)
+	// Izinkan domain bawaan Railway, custom domain .cc.cd, serta IP (100.x.x.x) & domain Tailscale (.ts.net)
 	if strings.HasSuffix(o, ".up.railway.app") ||
 		strings.HasSuffix(o, "itebaincubatortelur.cc.cd") ||
-		strings.HasSuffix(o, ".ts.net") {
+		strings.HasSuffix(o, ".ts.net") ||
+		strings.HasPrefix(o, "http://100.") ||
+		strings.HasPrefix(o, "https://100.") {
 		return true
 	}
 	return false
