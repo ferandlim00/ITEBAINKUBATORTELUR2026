@@ -721,7 +721,7 @@ void pollPhysicalSwitches() {
 }
 
 // ============================================================================
-// 12. LAYAR DUAL OLED 0.96" SSD1306 (GAYA UI VISUAL ANGKA BESAR & IKON WI-FI)
+// 12. LAYAR DUAL OLED 0.96" SSD1306 (ANGKA BESAR SUHU & KELEMBAPAN, BERSIH)
 // ============================================================================
 void formatStartDateWib(time_t epochUtc, char* outBuf, size_t outSize) {
   if (epochUtc <= 0) {
@@ -756,61 +756,7 @@ const char* getSesiLabel() {
   return "Belum Jalan";
 }
 
-// Menggambar ikon termometer di pojok kiri atas (seperti referensi Gambar 1)
-void drawThermometerIcon(Adafruit_SSD1306& disp, int x, int y) {
-  disp.drawRoundRect(x + 2, y, 5, 9, 2, SSD1306_WHITE);
-  disp.fillCircle(x + 4, y + 10, 3, SSD1306_WHITE);
-  disp.drawFastVLine(x + 4, y + 3, 6, SSD1306_WHITE);
-  // Garis skala di kanan termometer
-  disp.drawFastHLine(x + 8, y + 2, 2, SSD1306_WHITE);
-  disp.drawFastHLine(x + 8, y + 4, 3, SSD1306_WHITE);
-  disp.drawFastHLine(x + 8, y + 6, 2, SSD1306_WHITE);
-}
-
-// Menggambar ikon antena + 4 balok sinyal Wi-Fi (seperti referensi Gambar 2)
-void drawWifiSignalIcon(Adafruit_SSD1306& disp, int x, int y) {
-  // Antena kecil di kiri
-  disp.drawLine(x, y + 1, x + 4, y + 1, SSD1306_WHITE);
-  disp.drawLine(x, y + 1, x + 2, y + 4, SSD1306_WHITE);
-  disp.drawLine(x + 4, y + 1, x + 2, y + 4, SSD1306_WHITE);
-  disp.drawFastVLine(x + 2, y + 4, 6, SSD1306_WHITE);
-
-  if (WiFi.status() != WL_CONNECTED) {
-    // Tanda 'X' jika Wi-Fi terputus
-    disp.drawLine(x + 7, y + 2, x + 13, y + 8, SSD1306_WHITE);
-    disp.drawLine(x + 13, y + 2, x + 7, y + 8, SSD1306_WHITE);
-    return;
-  }
-
-  // Hitung jumlah bar (1..4) berdasarkan kekuatan sinyal RSSI
-  long rssi = WiFi.RSSI();
-  int bars = 4;
-  if (rssi < -85)      bars = 1;
-  else if (rssi < -75) bars = 2;
-  else if (rssi < -65) bars = 3;
-
-  for (int i = 0; i < 4; i++) {
-    int bh = (i + 1) * 2 + 1; // Tinggi bar: 3, 5, 7, 9 px
-    int bx = x + 6 + (i * 3);
-    int by = y + 10 - bh;
-    if (i < bars) {
-      disp.fillRect(bx, by, 2, bh, SSD1306_WHITE);
-    } else {
-      disp.drawFastHLine(bx, y + 9, 2, SSD1306_WHITE);
-    }
-  }
-}
-
-// Menggambar ikon kipas/baling-baling di tengah antara Suhu & Kelembapan (seperti referensi Gambar 1)
-void drawCenterBadgeIcon(Adafruit_SSD1306& disp, int cx, int cy) {
-  disp.fillCircle(cx, cy, 2, SSD1306_WHITE);
-  disp.fillCircle(cx - 3, cy - 3, 2, SSD1306_WHITE);
-  disp.fillCircle(cx + 3, cy - 3, 2, SSD1306_WHITE);
-  disp.fillCircle(cx - 3, cy + 3, 2, SSD1306_WHITE);
-  disp.fillCircle(cx + 3, cy + 3, 2, SSD1306_WHITE);
-}
-
-// Menggambar blok angka besar Suhu (Kiri) & Kelembapan (Kanan) + Garis Bawah + Label
+// Menggambar blok angka besar Suhu (Kiri) & Kelembapan (Kanan) + Garis Bawah + Label (tanpa logo kipas)
 void drawBigTempHumiditySection(Adafruit_SSD1306& disp, int numY, int lineY, int labelY) {
   disp.setTextColor(SSD1306_WHITE);
 
@@ -822,58 +768,54 @@ void drawBigTempHumiditySection(Adafruit_SSD1306& disp, int numY, int lineY, int
     disp.setCursor(80, numY);
     disp.print("ERR");
   } else {
-    disp.setCursor(2, numY);
+    disp.setCursor(4, numY);
     disp.printf("%.1f", state.temperature);
 
-    disp.setCursor(80, numY);
+    disp.setCursor(78, numY);
     disp.printf("%.0f%%", state.humidity);
   }
 
-  // 2. Ikon di tengah layar (seperti referensi Gambar 1)
-  drawCenterBadgeIcon(disp, 64, numY + 7);
+  // 2. Garis bawah kembar di bawah angka Suhu & Kelembapan
+  disp.drawFastHLine(4, lineY, 50, SSD1306_WHITE);
+  disp.drawFastHLine(74, lineY, 50, SSD1306_WHITE);
 
-  // 3. Garis bawah kembar di bawah angka Suhu & Kelembapan
-  disp.drawFastHLine(2, lineY, 52, SSD1306_WHITE);
-  disp.drawFastHLine(74, lineY, 52, SSD1306_WHITE);
-
-  // 4. Label keterangan di bawah garis ("Suhu (C)" dan "Lembap")
+  // 3. Label keterangan di bawah garis ("Suhu (C)" dan "Lembap")
   disp.setTextSize(1);
-  disp.setCursor(4, labelY);
+  disp.setCursor(6, labelY);
   disp.print("Suhu (C)");
 
-  disp.setCursor(82, labelY);
+  disp.setCursor(80, labelY);
   disp.print("Lembap");
 }
 
-// Fallback jika hanya 1 OLED yang dicolok: semua info tampil dalam 1 layar bergaya Gambar 1 & 2
+// Fallback jika hanya 1 OLED yang dicolok: semua info tampil bersih dalam 1 layar
 void renderSingleCombinedOled(Adafruit_SSD1306& disp) {
   disp.clearDisplay();
   disp.setTextSize(1);
   disp.setTextColor(SSD1306_WHITE);
 
-  // Baris Atas (y=0..11): Tanggal Mulai Singkat + Hari + Ikon Wi-Fi
+  // Baris Atas (y=0): Tanggal Mulai Singkat + Progres Hari
   char shortDate[12];
   if (state.incubationStatus == "running") {
     formatShortStartDateWib(state.startedAtEpoch, shortDate, sizeof(shortDate));
-    disp.setCursor(0, 2);
+    disp.setCursor(0, 1);
     disp.printf("%s | Hari %d/21", shortDate, state.currentDay);
   } else if (state.incubationStatus == "finished") {
-    disp.setCursor(0, 2);
+    disp.setCursor(0, 1);
     disp.print("Selesai 21 Hari");
   } else {
-    disp.setCursor(0, 2);
-    disp.print("Mulai: Belum (0/21)");
+    disp.setCursor(0, 1);
+    disp.print("Belum Mulai (0/21)");
   }
-  drawWifiSignalIcon(disp, 110, 0);
 
-  // Bagian Tengah (y=15..47): Angka Besar Suhu & Kelembapan (Gaya Gambar 1)
+  // Bagian Tengah (y=15..47): Angka Besar Suhu & Kelembapan
   drawBigTempHumiditySection(disp, 15, 34, 38);
 
   // Baris Bawah (y=54): Sesi & Status Wi-Fi
   disp.setCursor(0, 54);
   disp.printf("Sesi:%s", getSesiLabel());
-  disp.setCursor(104, 54);
-  disp.print((WiFi.status() == WL_CONNECTED) ? "ON" : "OFF");
+  disp.setCursor(98, 54);
+  disp.print((WiFi.status() == WL_CONNECTED) ? "WiFi" : "Putus");
 
   disp.display();
 }
@@ -884,34 +826,28 @@ void updateOledDisplay() {
   // Jika kedua OLED terpasang (OLED-1 di GPIO 21/22 & OLED-2 di GPIO 32/33):
   if (state.oledAvailable && state.oled2Available) {
     // =========================================================================
-    // LAYAR OLED 1 (GPIO 21/22): UI SUHU, KELEMBAPAN & WI-FI (PERSIS GAMBAR 1)
+    // LAYAR OLED 1 (GPIO 21/22): SUHU, KELEMBAPAN & STATUS WI-FI
     // =========================================================================
     oled.clearDisplay();
     oled.setTextSize(1);
     oled.setTextColor(SSD1306_WHITE);
 
-    // Top Bar: Ikon Termometer + Status Wi-Fi + Ikon Bar Sinyal Wi-Fi
-    drawThermometerIcon(oled, 0, 1);
-    oled.setCursor(15, 3);
+    // Baris Atas: Status Koneksi Wi-Fi saja (bersih tanpa bar sinyal)
+    oled.setCursor(0, 2);
     if (WiFi.status() == WL_CONNECTED) {
-      oled.print("WiFi: Terhubung");
+      oled.print("WiFi : Terhubung");
     } else {
-      oled.print("WiFi: Terputus");
+      oled.print("WiFi : Terputus");
     }
-    drawWifiSignalIcon(oled, 110, 1);
+    oled.drawFastHLine(0, 12, 128, SSD1306_WHITE);
 
-    // Tengah & Bawah: Angka Besar Suhu (Kiri) & Kelembapan (Kanan) + Garis + Label
-    drawBigTempHumiditySection(oled, 22, 42, 47);
-
-    // Label tengah bawah di bawah ikon kipas
-    oled.setTextSize(1);
-    oled.setCursor(52, 47);
-    oled.print((WiFi.status() == WL_CONNECTED) ? "ONLINE" : "LOKAL");
+    // Bagian Tengah & Bawah: Angka Besar Suhu (Kiri) & Kelembapan (Kanan) + Garis + Label
+    drawBigTempHumiditySection(oled, 21, 41, 47);
 
     oled.display();
 
     // =========================================================================
-    // LAYAR OLED 2 (GPIO 32/33): KAPAN MULAI, PROGRES HARI (BAR) & SESI
+    // LAYAR OLED 2 (GPIO 32/33): KAPAN MULAI, PROGRES HARI & SESI
     // =========================================================================
     char startDateStr[16];
     if (state.incubationStatus == "running" || state.incubationStatus == "finished") {
@@ -924,18 +860,17 @@ void updateOledDisplay() {
     oled2.setTextSize(1);
     oled2.setTextColor(SSD1306_WHITE);
 
-    // Top Bar: Judul + Ikon Sinyal Wi-Fi
-    oled2.setCursor(0, 2);
+    // Baris Atas: Judul
+    oled2.setCursor(16, 2);
     oled2.print("STATUS INKUBASI");
-    drawWifiSignalIcon(oled2, 110, 0);
     oled2.drawFastHLine(0, 12, 128, SSD1306_WHITE);
 
-    // Baris Kapan Mulai
-    oled2.setCursor(0, 16);
+    // Baris 1: Kapan Mulai
+    oled2.setCursor(0, 18);
     oled2.printf("Mulai  : %s", startDateStr);
 
-    // Baris Progres Hari
-    oled2.setCursor(0, 28);
+    // Baris 2: Progres Hari
+    oled2.setCursor(0, 34);
     if (state.incubationStatus == "running") {
       oled2.printf("Progres: Hari %d/21", state.currentDay);
     } else if (state.incubationStatus == "finished") {
@@ -944,16 +879,8 @@ void updateOledDisplay() {
       oled2.print("Progres: 0/21 Hari");
     }
 
-    // Visual Progress Bar (seperti balok progres di Gambar 2)
-    oled2.drawRect(0, 39, 128, 7, SSD1306_WHITE);
-    int progressDays = (state.incubationStatus == "finished") ? INCUBATION_TOTAL_DAYS : state.currentDay;
-    int fillW = constrain((progressDays * 124) / INCUBATION_TOTAL_DAYS, 0, 124);
-    if (fillW > 0) {
-      oled2.fillRect(2, 41, fillW, 3, SSD1306_WHITE);
-    }
-
-    // Baris Sesi (Putar Telur / Tidak Putar / Belum Jalan)
-    oled2.setCursor(0, 51);
+    // Baris 3: Sesi (Putar Telur / Tidak Putar / Belum Jalan)
+    oled2.setCursor(0, 50);
     oled2.printf("Sesi   : %s", getSesiLabel());
 
     oled2.display();
