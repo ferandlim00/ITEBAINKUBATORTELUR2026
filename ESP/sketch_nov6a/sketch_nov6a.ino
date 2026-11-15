@@ -65,12 +65,9 @@ const char* DEVICE_ID             = "inkubator-01";
 const char* DEFAULT_WIFI_SSID     = "RNP135G";
 const char* DEFAULT_WIFI_PASS     = "88998899";
 
-// URL Backend Go Fiber (Disamakan dengan Mesin Tailscale VPS "nandoz": 100.83.29.119)
-// Catatan:
-// - Jika lewat Hotspot Laptop yang aktif Tailscale / Subnet Router: "http://100.83.29.119:3000/api/device/telemetry"
-// - Jika pakai Tailscale Funnel publik: "https://nandoz.<nama-tailnet>.ts.net/api/device/telemetry"
-// - Jika pakai Custom Domain HTTPS:     "https://itebaincubatortelur.cc.cd/api/device/telemetry"
-const char* BACKEND_TELEMETRY_URL = "http://100.83.29.119:3000/api/device/telemetry";
+// URL Backend Utama (Custom Domain HTTPS) & Fallback Otomatis (Tailscale VPS "nandoz": 100.83.29.119)
+const char* BACKEND_TELEMETRY_URL = "https://itebaincubatortelur.cc.cd/api/device/telemetry";
+const char* BACKEND_FALLBACK_URL  = "http://100.83.29.119:3000/api/device/telemetry";
 const char* DEVICE_API_KEY        = "secret-device-token-esp32";
 
 const char* NTP_SERVER_1          = "pool.ntp.org";
@@ -1218,23 +1215,35 @@ void sendTelemetryAndPollBackend() {
   String payload;
   serializeJson(doc, payload);
 
-  HTTPClient http;
-  WiFiClientSecure secureClient;
-  String targetUrl = String(BACKEND_TELEMETRY_URL);
-  if (targetUrl.startsWith("https://")) {
-    // Mendukung HTTPS (misalnya Tailscale Funnel: https://nama-vps.tailxxxx.ts.net/api/device/telemetry)
-    secureClient.setInsecure();
-    http.begin(secureClient, targetUrl);
-  } else {
-    http.begin(targetUrl);
-  }
-  http.setTimeout(3500);
-  http.addHeader("Content-Type", "application/json");
-  http.addHeader("X-Device-Key", DEVICE_API_KEY);
+  auto postToBackend = [&](const String& url, String& outResponse) -> int {
+    HTTPClient http;
+    WiFiClientSecure secureClient;
+    if (url.startsWith("https://")) {
+      secureClient.setInsecure();
+      http.begin(secureClient, url);
+    } else {
+      http.begin(url);
+    }
+    http.setTimeout(3500);
+    http.addHeader("Content-Type", "application/json");
+    http.addHeader("X-Device-Key", DEVICE_API_KEY);
 
-  int httpCode = http.POST(payload);
+    int code = http.POST(payload);
+    if (code >= 200 && code < 300) {
+      outResponse = http.getString();
+    }
+    http.end();
+    return code;
+  };
+
+  String responseBody;
+  int httpCode = postToBackend(String(BACKEND_TELEMETRY_URL), responseBody);
+  if ((httpCode < 200 || httpCode >= 300) && strlen(BACKEND_FALLBACK_URL) > 0) {
+    Serial.printf("[HTTP] URL utama gagal (HTTP %d), mencoba fallback Tailscale (%s)...\n", httpCode, BACKEND_FALLBACK_URL);
+    httpCode = postToBackend(String(BACKEND_FALLBACK_URL), responseBody);
+  }
+
   if (httpCode >= 200 && httpCode < 300) {
-    String responseBody = http.getString();
     if (state.commAlertPending) state.commAlertPending = false;
 
     if (responseBody.length() > 2) {
@@ -1253,7 +1262,6 @@ void sendTelemetryAndPollBackend() {
   } else {
     Serial.printf("[HTTP] Gagal kirim telemetri (HTTP %d)\n", httpCode);
   }
-  http.end();
 }
 
 // ============================================================================
