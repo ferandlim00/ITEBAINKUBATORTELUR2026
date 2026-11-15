@@ -65,9 +65,12 @@ const char* DEVICE_ID             = "inkubator-01";
 const char* DEFAULT_WIFI_SSID     = "RNP135G";
 const char* DEFAULT_WIFI_PASS     = "88998899";
 
-// URL Backend Production (Railway + Custom Domain HTTPS)
-// Untuk uji lokal, ganti ke: "http://10.219.140.40:3000/api/device/telemetry"
-const char* BACKEND_TELEMETRY_URL = "https://itebaincubatortelur.cc.cd/api/device/telemetry";
+// URL Backend Go Fiber (Disamakan dengan Mesin Tailscale VPS "nandoz": 100.83.29.119)
+// Catatan:
+// - Jika lewat Hotspot Laptop yang aktif Tailscale / Subnet Router: "http://100.83.29.119:3000/api/device/telemetry"
+// - Jika pakai Tailscale Funnel publik: "https://nandoz.<nama-tailnet>.ts.net/api/device/telemetry"
+// - Jika pakai Custom Domain HTTPS:     "https://itebaincubatortelur.cc.cd/api/device/telemetry"
+const char* BACKEND_TELEMETRY_URL = "http://100.83.29.119:3000/api/device/telemetry";
 const char* DEVICE_API_KEY        = "secret-device-token-esp32";
 
 const char* NTP_SERVER_1          = "pool.ntp.org";
