@@ -62,8 +62,8 @@
 // 2. KONFIGURASI JARINGAN, BACKEND GO FIBER, & IDENTITAS ALAT
 // ============================================================================
 const char* DEVICE_ID             = "inkubator-01";
-const char* DEFAULT_WIFI_SSID     = "IncubatorNet";
-const char* DEFAULT_WIFI_PASS     = "password123";
+const char* DEFAULT_WIFI_SSID     = "RNP135G";
+const char* DEFAULT_WIFI_PASS     = "88998899";
 
 // Ganti IP di bawah ini dengan alamat IP komputer/VPS Backend Go Fiber Anda
 const char* BACKEND_TELEMETRY_URL = "http://192.168.1.100:3000/api/device/telemetry";
