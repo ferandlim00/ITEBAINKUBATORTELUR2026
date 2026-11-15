@@ -8,7 +8,6 @@
  *   - GPIO 19 : Positif (+) Buzzer Aktif SFM-27
  *   - GPIO 21 : Jalur SDA I2C (SHT30 [0x44], OLED SSD1306 [0x3C], RTC DS3231 [0x68])
  *   - GPIO 22 : Jalur SCL I2C (SHT30 [0x44], OLED SSD1306 [0x3C], RTC DS3231 [0x68])
- *   - GPIO 23 : Saklar Maintenance (INPUT_PULLUP, aktif LOW)
  *   - GPIO 25 : PWM / DIM Trigger RobotDyn AC Dimmer (Bohlam 60W)
  *   - GPIO 26 : Push Button Start - 1 Unit (INPUT_PULLUP, aktif LOW)
  *   - GPIO 34 : Z-C (Zero-Cross Detector) RobotDyn AC Dimmer (Input Interrupt)
@@ -45,7 +44,6 @@
 #define PIN_BUZZER_SFM27    19  // Positif (+) Buzzer Aktif SFM-27
 #define PIN_I2C_SDA         21  // SDA Bersama (SHT30, OLED, RTC)
 #define PIN_I2C_SCL         22  // SCL Bersama (SHT30, OLED, RTC)
-#define PIN_SW_MAINTENANCE  23  // Saklar Maintenance (INPUT_PULLUP)
 #define PIN_DIMMER_DIM      25  // Output Trigger Gate Triac RobotDyn AC Dimmer
 #define PIN_BTN_START       26  // Push Button Start (INPUT_PULLUP)
 #define PIN_DIMMER_ZC       34  // Input Zero-Cross Detector RobotDyn AC Dimmer
@@ -191,9 +189,6 @@ struct IncubatorState {
   float humidity          = 58.0f;
   int   sensorFailStreak  = 0;
   bool  sensorError       = false;
-
-  // Saklar Maintenance (GPIO 23)
-  bool  maintenanceMode   = false;
 
   // Siklus Inkubasi 21 Hari
   String incubationStatus = "idle"; // "idle" | "running" | "finished"
@@ -350,13 +345,6 @@ void saveSettingsToNVS() {
 // 9. AKTUATOR: ROBOTDYN AC DIMMER (GPIO 25/34), SERVO MG90S (GPIO 18), BUZZER
 // ============================================================================
 void applyLampOutput(int intensityPercent) {
-  if (state.maintenanceMode) {
-    state.lampIntensity = 0;
-    acDimmerIntensity   = 0;
-    GPIO.out_w1tc       = (1UL << PIN_DIMMER_DIM);
-    return;
-  }
-
   int clamped = constrain(intensityPercent, 0, 100);
   if (state.lampMode == "manual") {
     clamped = constrain(clamped, 0, LAMP_MANUAL_MAX_PCT); // Maks 80% saat manual
@@ -409,12 +397,6 @@ void stopTurningCycle(bool completedNormally) {
 }
 
 void updateBuzzerAlarm() {
-  if (state.maintenanceMode) {
-    digitalWrite(PIN_BUZZER_SFM27, LOW);
-    buzzerPinState = false;
-    return;
-  }
-
   bool isTempAlarm = (state.temperature > TEMP_SAFE_MAX || state.temperature < TEMP_SAFE_MIN);
   bool isCritical  = isTempAlarm || state.sensorError;
 
@@ -564,11 +546,6 @@ float defuzzifyCentroidVent(const float clipLevel[5]) {
 }
 
 void evaluateFuzzyControl() {
-  if (state.maintenanceMode) {
-    applyLampOutput(0);
-    return;
-  }
-
   float e  = state.temperature - state.targetTemperature;
   float de = state.temperature - state.prevTemperature;
 
@@ -658,7 +635,7 @@ void evaluateFuzzyControl() {
 }
 
 // ============================================================================
-// 11. INPUT TOMBOL FISIK (PUSH BUTTON START GPIO 26 & SAKLAR MAINT GPIO 23)
+// 11. INPUT TOMBOL FISIK (PUSH BUTTON START GPIO 26)
 // ============================================================================
 void startIncubationLocalOrRemote() {
   time_t now             = getCurrentEpoch();
@@ -691,25 +668,7 @@ void stopIncubationLocalOrRemote() {
 }
 
 void pollPhysicalSwitches() {
-  // 1. Saklar Maintenance (GPIO 23 - INPUT_PULLUP, Aktif LOW)
-  bool maintActive = (digitalRead(PIN_SW_MAINTENANCE) == LOW);
-  if (maintActive != state.maintenanceMode) {
-    state.maintenanceMode = maintActive;
-    if (state.maintenanceMode) {
-      Serial.println("[MAINTENANCE] Saklar Maintenance AKTIF -> Pemanas & Buzzer dinonaktifkan.");
-      applyLampOutput(0);
-      digitalWrite(PIN_BUZZER_SFM27, LOW);
-    } else {
-      Serial.println("[MAINTENANCE] Saklar Maintenance NONAKTIF -> Kembali ke operasi normal.");
-      if (state.lampMode == "auto") {
-        evaluateFuzzyControl();
-      } else {
-        applyLampOutput(state.lampIntensity);
-      }
-    }
-  }
-
-  // 2. Push Button Start (GPIO 26 - INPUT_PULLUP, Aktif LOW)
+  // Push Button Start (GPIO 26 - INPUT_PULLUP, Aktif LOW)
   bool reading = digitalRead(PIN_BTN_START);
   unsigned long nowMs = millis();
 
@@ -762,9 +721,7 @@ void updateOledDisplay() {
 
   // Baris 1: Header Status Siklus & Wi-Fi
   oled.setCursor(0, 0);
-  if (state.maintenanceMode) {
-    oled.print("[MODE MAINTENANCE]");
-  } else if (state.incubationStatus == "running") {
+  if (state.incubationStatus == "running") {
     oled.printf("H-%02d/21 %s", state.currentDay,
                 (state.stage == "lockdown") ? "LOCK" : "TURN");
   } else if (state.incubationStatus == "finished") {
@@ -963,12 +920,6 @@ void buildDeviceCondition(String& outHealth, String& outSummary) {
     } else {
       outSummary = "Gangguan sensor: Pembacaan sensor SHT30/SHT31 gagal 3 kali berturut-turut.";
     }
-    return;
-  }
-
-  if (state.maintenanceMode) {
-    outHealth  = "warning";
-    outSummary = "Saklar Maintenance aktif. Pemanas dan alarm dinonaktifkan sementara.";
     return;
   }
 
@@ -1311,8 +1262,7 @@ void setup() {
 
   loadSettingsFromNVS();
 
-  // 1. Konfigurasi Pin Tombol, Saklar, dan Buzzer
-  pinMode(PIN_SW_MAINTENANCE, INPUT_PULLUP);
+  // 1. Konfigurasi Pin Tombol Start dan Buzzer
   pinMode(PIN_BTN_START, INPUT_PULLUP);
   pinMode(PIN_BUZZER_SFM27, OUTPUT);
   digitalWrite(PIN_BUZZER_SFM27, LOW);
@@ -1377,7 +1327,7 @@ void setup() {
 void loop() {
   unsigned long nowMs = millis();
 
-  // 1. Cek Saklar Maintenance (GPIO 23), Push Button Start (GPIO 26), & Buzzer (GPIO 19)
+  // 1. Cek Push Button Start (GPIO 26) & Buzzer (GPIO 19)
   pollPhysicalSwitches();
   updateBuzzerAlarm();
 

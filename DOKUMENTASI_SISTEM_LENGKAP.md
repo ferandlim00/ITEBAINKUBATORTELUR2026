@@ -28,7 +28,7 @@ Sistem ini dirancang untuk memantau dan mengendalikan proses penetasan telur sel
 flowchart LR
     subgraph ESP["Hardware & Firmware ESP32 DOIT (30-Pin)"]
         SEN["Sensor SHT30 (0x44) & RTC DS3231 (0x68)"]
-        SW["Push Button Start (GPIO 26) & Saklar Maint (GPIO 23)"]
+        SW["Push Button Start (GPIO 26)"]
         FUZ["Logika Fuzzy Mamdani & State Siklus 21 Hari"]
         ACT["AC Dimmer (GPIO 34/25), Servo MG90S (GPIO 18), OLED (0x3C), Buzzer (GPIO 19)"]
         NVS["Memori NVS Flash (loadSettingsFromNVS / saveSettingsToNVS)"]
@@ -103,7 +103,6 @@ Sesuai panduan wiring final:
 | `PIN_BUZZER_SFM27` | `GPIO 19` | Digital Output | Kabel merah (+) Buzzer Aktif SFM-27; kabel hitam (-) ke GND Baseplate. |
 | `PIN_I2C_SDA` | `GPIO 21` | I2C Data | Dicabang di Baut 5 TB-1512 ke SHT30, OLED, dan RTC. |
 | `PIN_I2C_SCL` | `GPIO 22` | I2C Clock | Dicabang di Baut 6 TB-1512 ke SHT30, OLED, dan RTC. |
-| `PIN_SW_MAINTENANCE` | `GPIO 23` | `INPUT_PULLUP` | Kaki Baut 1 Saklar Maintenance; Baut 2 ke GND Baseplate. |
 | `PIN_DIMMER_DIM` | `GPIO 25` | Digital/Pulse Out | Pin `PWM / DIM` RobotDyn AC Dimmer (pemicu intensitas bohlam 60W). |
 | `PIN_BTN_START` | `GPIO 26` | `INPUT_PULLUP` | Kaki Pin 1 Push Button Start (1 unit); Pin 2 ke GND Baseplate. |
 | `PIN_DIMMER_ZC` | `GPIO 34` | Input Interrupt | Pin `Z-C` (*Zero-Cross Detector*) RobotDyn AC Dimmer. |
@@ -142,9 +141,8 @@ Untuk menjaga suhu tetap stabil di sekitar target (`TEMP_DEFAULT_TARGET = 37.5f`
 - **Siklus Inkubasi (`updateIncubationCycle()`):**
   - Mengelola siklus total `INCUBATION_TOTAL_DAYS = 21` dengan fase *lockdown* dimulai pada hari ke-19 (`INCUBATION_LOCKDOWN_START = 19`).
   - Siklus dapat dijalankan dan dihentikan melalui fungsi `startIncubationLocalOrRemote()` dan `stopIncubationLocalOrRemote()`.
-- **Pembacaan Tombol & Saklar (`pollPhysicalSwitches()`):**
+- **Pembacaan Tombol (`pollPhysicalSwitches()`):**
   - **Push Button Start (`PIN_BTN_START = 26`):** Tekan singkat (`< 2 detik`) saat inkubator belum berjalan akan memulai siklus 21 hari; tekan tahan lama (`>= 3 detik`) saat sedang berjalan akan menghentikan siklus kembali ke `idle`.
-  - **Saklar Maintenance (`PIN_SW_MAINTENANCE = 23`):** Membaca status saklar fisik mode pemeliharaan.
 - **Aktuator & Alarm:**
   - `applyLampOutput()`, `applyVentilationOutput()`, `startTurningCycle()`, `stopTurningCycle()`, dan `updateBuzzerAlarm()` (mengendalikan Buzzer Aktif SFM-27 di `GPIO 19`, dengan batas suhu aman `TEMP_SAFE_MIN = 36.5f` s.d. `TEMP_SAFE_MAX = 38.5f` serta batas kelembapan `HUMIDITY_WARN_MAX = 75.0f`).
 

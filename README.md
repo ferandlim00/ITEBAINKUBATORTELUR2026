@@ -27,7 +27,7 @@ Sistem **Internet of Things (IoT)** *end-to-end* untuk memantau dan mengendalika
 - **Kendali Cerdas Logika Fuzzy Mamdani (2-Input, 2-Output, 9 Aturan):** Mengevaluasi matriks aturan linguistik `3x3` (*Fuzzifikasi* $\rightarrow$ *Implikasi MIN* $\rightarrow$ *Agregasi MAX* $\rightarrow$ *Defuzzifikasi Centroid / Titik Berat*) untuk mengatur intensitas bohlam pemanas (`0–100%` saat mode otomatis) dan sudut bukaan ventilasi servo MG90S (`0°–90°`) guna menjaga suhu optimal `37.5°C` (rentang aman `36.5°C – 38.5°C`), dilengkapi *passive humidity override* saat kelembapan melewati batas peringatan (`75% RH`).
 - **Driver RobotDyn AC Dimmer Bebas Kedip (*IRAM-Safe*):** Menggunakan *hardware timer interrupt* periodik `100 µs` (`100` tick per setengah gelombang AC 50Hz `10.000 µs`) dan pemicu gerbang TRIAC `200 µs` via register `GPIO.out_w1ts`/`w1tc`, disertai pengaman `dimmerZCPaused` saat menulis ke memori flash NVS.
 - **Manajemen Siklus 21 Hari Tahan Mati Listrik:** Menyimpan status siklus ke **NVS (Non-Volatile Storage)** dan menjaga akurasi waktu menggunakan kombinasi **RTC DS3231SN** (`0x68`) + sinkronisasi **NTP**. Otomatis membedakan **Fase Turning (Hari 1–18)** dan **Fase Lockdown (Hari 19–21)**.
-- **Kontrol Lokal & Pengaman Jaringan:** Mendukung **Push Button Start** fisik (tekan singkat `< 2 detik` untuk mulai siklus, tekan tahan `>= 3 detik` untuk menghentikan siklus ke `idle`), **Saklar Maintenance**, alarm **Buzzer Aktif SFM-27**, layar **OLED 0.96" SSD1306**, serta **Auto-Rollback Wi-Fi 30 Detik** jika kredensial Wi-Fi baru gagal terhubung.
+- **Kontrol Lokal & Pengaman Jaringan:** Mendukung **Push Button Start** fisik (tekan singkat `< 2 detik` untuk mulai siklus, tekan tahan `>= 3 detik` untuk menghentikan siklus ke `idle`), alarm **Buzzer Aktif SFM-27**, layar **OLED 0.96" SSD1306**, serta **Auto-Rollback Wi-Fi 30 Detik** jika kredensial Wi-Fi baru gagal terhubung.
 
 ### 2. Backend Server (Go Fiber v3 + MySQL 8.4)
 - **Keamanan Berlapis:**
@@ -51,7 +51,7 @@ Sistem **Internet of Things (IoT)** *end-to-end* untuk memantau dan mengendalika
 flowchart LR
     subgraph ESP["ESP32 DOIT (30-Pin)"]
         SEN["SHT30 (0x44) & RTC DS3231 (0x68)"]
-        BTN["Push Button Start (GPIO 26) & Saklar Maint (GPIO 23)"]
+        BTN["Push Button Start (GPIO 26)"]
         FUZ["Fuzzy Mamdani 3x3 & State 21 Hari"]
         ACT["AC Dimmer (GPIO 34/25), Servo MG90S (GPIO 18), OLED (0x3C), Buzzer (GPIO 19)"]
         SEN --> FUZ
@@ -127,7 +127,6 @@ flowchart LR
 | `GPIO 19` | `PIN_BUZZER_SFM27` | Digital Output | Kabel Merah (`+`) Buzzer Aktif SFM-27; kabel Hitam (`-`) ke GND Baseplate. |
 | `GPIO 21` | `PIN_I2C_SDA` | I2C SDA | Dicabang di Baut 5 TB-1512 untuk SHT30 (`0x44`), OLED SSD1306 (`0x3C`), dan RTC DS3231 (`0x68`). |
 | `GPIO 22` | `PIN_I2C_SCL` | I2C SCL | Dicabang di Baut 6 TB-1512 untuk SHT30 (`0x44`), OLED SSD1306 (`0x3C`), dan RTC DS3231 (`0x68`). |
-| `GPIO 23` | `PIN_SW_MAINTENANCE` | `INPUT_PULLUP` | Saklar Maintenance (kaki 1 ke `GPIO 23`, kaki 2 ke `GND`). |
 | `GPIO 25` | `PIN_DIMMER_DIM` | Digital Pulse | Pin `PWM / DIM` RobotDyn AC Dimmer (pemicu intensitas bohlam pemanas 60W). |
 | `GPIO 26` | `PIN_BTN_START` | `INPUT_PULLUP` | Push Button Start (kaki 1 ke `GPIO 26`, kaki 2 ke `GND`). |
 | `GPIO 34` | `PIN_DIMMER_ZC` | Input Interrupt | Pin `Z-C` (*Zero-Cross Detector*) RobotDyn AC Dimmer. |

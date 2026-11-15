@@ -44,7 +44,6 @@ Buka **Tools > Manage Libraries...** (*Library Manager*) di Arduino IDE, lalu ca
 | **GPIO 19** | Buzzer Aktif SFM-27 (+) | `OUTPUT` | Berbunyi *beep-beep* intermiten (300ms ON / 700ms OFF) saat suhu di luar batas aman (`< 36.5°C` atau `> 38.5°C`) atau sensor error. |
 | **GPIO 21** | Jalur SDA I2C Bersama | `Wire.begin(21, 22)` | Terhubung paralel ke **SHT30 (`0x44`)**, **OLED (`0x3C`)**, dan **RTC DS3231 (`0x68`)**. |
 | **GPIO 22** | Jalur SCL I2C Bersama | `Wire.begin(21, 22)` | Jalur clock I2C untuk ketiga modul di atas. |
-| **GPIO 23** | Saklar Maintenance | `INPUT_PULLUP` (Aktif `LOW`) | Saat saklar ON (`LOW`), bohlam 60W langsung dimatikan (`0%`), buzzer dibisukan, dan OLED menampilkan `[MODE MAINTENANCE]`. |
 | **GPIO 25** | PWM / DIM RobotDyn AC Dimmer | `OUTPUT` (Pulsa Gate Triac) | Mengirimkan pulsa pemicu $200\ \mu\text{s}$ lewat timer tick $100\ \mu\text{s}$ setelah jeda sudut fasa (*phase-cut*) tercapai. |
 | **GPIO 26** | Push Button Start (1 Unit) | `INPUT_PULLUP` (Aktif `LOW`) | **Tekan singkat (< 2 detik):** Mulai siklus inkubasi 21 hari.<br>**Tekan tahan ($\ge$ 3 detik):** Hentikan/reset siklus ke `idle`. |
 | **GPIO 34** | Z-C RobotDyn AC Dimmer | `INPUT` + `attachInterrupt(RISING)` | Mendeteksi titik *Zero-Crossing* gelombang AC 50Hz setiap $10\ \text{ms}$ ($10.000\ \mu\text{s}$). |
