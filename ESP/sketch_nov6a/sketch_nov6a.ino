@@ -229,6 +229,10 @@ struct IncubatorState {
   bool   commAlertPending  = false;
   String commAlertMessage  = "";
 
+  // Status Koneksi ke Server Web (untuk ditampilkan di OLED)
+  bool   backendChecked    = false;
+  bool   backendConnected  = false;
+
   // Pelacakan Perintah Terakhir (last_command)
   long   lastCmdId         = 0;
   String lastCmdTarget     = "";
@@ -732,7 +736,7 @@ void updateOledDisplay() {
   oled.setTextSize(1);
   oled.setTextColor(SSD1306_WHITE);
 
-  // Baris 1: Kapan Mulai (Tanggal Mulai WIB atau Belum Mulai)
+  // Baris 1 (y=0): Kapan Mulai (Tanggal Mulai WIB atau Belum Mulai)
   char startDateStr[16];
   if (state.incubationStatus == "running" || state.incubationStatus == "finished") {
     formatStartDateWib(state.startedAtEpoch, startDateStr, sizeof(startDateStr));
@@ -742,8 +746,8 @@ void updateOledDisplay() {
   oled.setCursor(0, 0);
   oled.printf("Mulai  : %s", startDateStr);
 
-  // Baris 2: Progres Hari Inkubasi (Hari ke-X dari 21 Hari)
-  oled.setCursor(0, 13);
+  // Baris 2 (y=11): Progres Hari Inkubasi (Hari ke-X dari 21 Hari)
+  oled.setCursor(0, 11);
   if (state.incubationStatus == "running") {
     oled.printf("Progres: Hari %d/21", state.currentDay);
   } else if (state.incubationStatus == "finished") {
@@ -752,8 +756,8 @@ void updateOledDisplay() {
     oled.print("Progres: 0/21 Hari");
   }
 
-  // Baris 3: Sesi Inkubasi (Putar Telur / Tidak Putar / Belum Jalan)
-  oled.setCursor(0, 26);
+  // Baris 3 (y=22): Sesi Inkubasi (Putar Telur / Tidak Putar / Belum Jalan)
+  oled.setCursor(0, 22);
   if (state.incubationStatus == "running") {
     if (state.stage == "lockdown") {
       oled.print("Sesi   : Tidak Putar");
@@ -768,22 +772,32 @@ void updateOledDisplay() {
     oled.print("Sesi   : Belum Jalan");
   }
 
-  oled.drawLine(0, 37, 127, 37, SSD1306_WHITE);
-
-  // Baris 4: Suhu Saat Ini
-  oled.setCursor(0, 41);
+  // Baris 4 (y=33): Suhu Saat Ini
+  oled.setCursor(0, 33);
   if (state.sensorError) {
     oled.print("Suhu   : Cek Sensor!");
   } else {
     oled.printf("Suhu   : %.1f C", state.temperature);
   }
 
-  // Baris 5: Kelembapan Saat Ini
-  oled.setCursor(0, 54);
+  // Baris 5 (y=44): Kelembapan Saat Ini
+  oled.setCursor(0, 44);
   if (state.sensorError) {
     oled.print("Lembap : Cek Sensor!");
   } else {
     oled.printf("Lembap : %.0f %%", state.humidity);
+  }
+
+  // Baris 6 (y=55): Status Koneksi (Wi-Fi & Server Web)
+  oled.setCursor(0, 55);
+  if (WiFi.status() != WL_CONNECTED) {
+    oled.print("Koneksi: Putus WiFi");
+  } else if (!state.backendChecked) {
+    oled.print("Koneksi: Mengecek..");
+  } else if (state.backendConnected) {
+    oled.print("Koneksi: Berhasil");
+  } else {
+    oled.print("Koneksi: Gagal Web");
   }
 
   oled.display();
@@ -1123,6 +1137,7 @@ void processIncomingSettings(JsonVariantConst settingsObj) {
 // ============================================================================
 void sendTelemetryAndPollBackend() {
   if (WiFi.status() != WL_CONNECTED) {
+    state.backendConnected = false;
     WiFi.reconnect();
     return;
   }
@@ -1268,7 +1283,9 @@ void sendTelemetryAndPollBackend() {
     httpCode = postToBackend(String(BACKEND_FALLBACK_URL), responseBody);
   }
 
+  state.backendChecked = true;
   if (httpCode >= 200 && httpCode < 300) {
+    state.backendConnected = true;
     if (state.commAlertPending) state.commAlertPending = false;
 
     if (responseBody.length() > 2) {
@@ -1285,6 +1302,7 @@ void sendTelemetryAndPollBackend() {
       }
     }
   } else {
+    state.backendConnected = false;
     Serial.printf("[HTTP] Gagal kirim telemetri (HTTP %d)\n", httpCode);
   }
 }
