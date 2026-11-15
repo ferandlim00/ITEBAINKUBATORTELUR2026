@@ -101,10 +101,12 @@ Sesuai panduan wiring final:
 | :--- | :--- | :--- | :--- |
 | `PIN_SERVO_MG90S` | `GPIO 18` | PWM Output | Kabel oranye (Signal) Motor Servo MG90S (`VENT_ANGLE_MIN=0` s.d. `VENT_ANGLE_MAX=90`). |
 | `PIN_BUZZER_SFM27` | `GPIO 19` | Digital Output | Kabel merah (+) Buzzer Aktif SFM-27; kabel hitam (-) ke GND Baseplate. |
-| `PIN_I2C_SDA` | `GPIO 21` | I2C Data | Dicabang di Baut 5 TB-1512 ke SHT30, OLED, dan RTC. |
-| `PIN_I2C_SCL` | `GPIO 22` | I2C Clock | Dicabang di Baut 6 TB-1512 ke SHT30, OLED, dan RTC. |
+| `PIN_I2C_SDA` | `GPIO 21` | I2C-1 Data | Dicabang di Baut 5 TB-1512 ke SHT30, OLED-1, dan RTC. |
+| `PIN_I2C_SCL` | `GPIO 22` | I2C-1 Clock | Dicabang di Baut 6 TB-1512 ke SHT30, OLED-1, dan RTC. |
 | `PIN_DIMMER_DIM` | `GPIO 25` | Digital/Pulse Out | Pin `PWM / DIM` RobotDyn AC Dimmer (pemicu intensitas bohlam 60W). |
 | `PIN_BTN_START` | `GPIO 26` | `INPUT_PULLUP` | Kaki Pin 1 Push Button Start (1 unit); Pin 2 ke GND Baseplate. |
+| `PIN_I2C2_SDA` | `GPIO 32` | I2C-2 Data | Jalur SDA khusus Layar OLED-2 (`Wire1`, Cara 1 tanpa solder). |
+| `PIN_I2C2_SCL` | `GPIO 33` | I2C-2 Clock | Jalur SCL khusus Layar OLED-2 (`Wire1`, Cara 1 tanpa solder). |
 | `PIN_DIMMER_ZC` | `GPIO 34` | Input Interrupt | Pin `Z-C` (*Zero-Cross Detector*) RobotDyn AC Dimmer. |
 | `I2C_ADDR_SHT30` | `0x44` | Alamat I2C | Sensor suhu & kelembapan SHT30-D / SHT31-D. |
 | `I2C_ADDR_OLED` | `0x3C` | Alamat I2C | Layar OLED 0.96" SSD1306 (`OLED_WIDTH=128`, `OLED_HEIGHT=64`). |

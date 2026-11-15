@@ -42,10 +42,12 @@ Buka **Tools > Manage Libraries...** (*Library Manager*) di Arduino IDE, lalu ca
 |---|---|---|---|
 | **GPIO 18** | Signal Servo MG90S (1 Unit) | `mg90sServo.attach(18, 500, 2400)` | Mengatur sudut bukaan `0°` (tutup) s/d `90°` (buka penuh) secara otomatis (Fuzzy) atau manual. |
 | **GPIO 19** | Buzzer Aktif SFM-27 (+) | `OUTPUT` | Berbunyi *beep-beep* intermiten (300ms ON / 700ms OFF) saat suhu di luar batas aman (`< 36.5°C` atau `> 38.5°C`) atau sensor error. |
-| **GPIO 21** | Jalur SDA I2C Bersama | `Wire.begin(21, 22)` | Terhubung paralel ke **SHT30 (`0x44`)**, **OLED (`0x3C`)**, dan **RTC DS3231 (`0x68`)**. |
-| **GPIO 22** | Jalur SCL I2C Bersama | `Wire.begin(21, 22)` | Jalur clock I2C untuk ketiga modul di atas. |
+| **GPIO 21** | Jalur SDA I2C-1 Bersama | `Wire.begin(21, 22)` | Terhubung paralel ke **SHT30 (`0x44`)**, **OLED-1 (`0x3C`)**, dan **RTC DS3231 (`0x68`)**. |
+| **GPIO 22** | Jalur SCL I2C-1 Bersama | `Wire.begin(21, 22)` | Jalur clock I2C-1 untuk ketiga modul di atas. |
 | **GPIO 25** | PWM / DIM RobotDyn AC Dimmer | `OUTPUT` (Pulsa Gate Triac) | Mengirimkan pulsa pemicu $200\ \mu\text{s}$ lewat timer tick $100\ \mu\text{s}$ setelah jeda sudut fasa (*phase-cut*) tercapai. |
 | **GPIO 26** | Push Button Start (1 Unit) | `INPUT_PULLUP` (Aktif `LOW`) | **Tekan singkat (< 2 detik):** Mulai siklus inkubasi 21 hari.<br>**Tekan tahan ($\ge$ 3 detik):** Hentikan/reset siklus ke `idle`. |
+| **GPIO 32** | Jalur SDA I2C-2 (OLED-2) | `Wire1.begin(32, 33)` | Jalur data khusus **OLED-2 (`0x3C`)** tanpa perlu menyolder jumper alamat. |
+| **GPIO 33** | Jalur SCL I2C-2 (OLED-2) | `Wire1.begin(32, 33)` | Jalur clock khusus **OLED-2 (`0x3C`)**. |
 | **GPIO 34** | Z-C RobotDyn AC Dimmer | `INPUT` + `attachInterrupt(RISING)` | Mendeteksi titik *Zero-Crossing* gelombang AC 50Hz setiap $10\ \text{ms}$ ($10.000\ \mu\text{s}$). |
 
 ---

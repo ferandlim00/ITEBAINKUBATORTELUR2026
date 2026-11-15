@@ -6,10 +6,12 @@
  * Mapping Pin Hardware (Sesuai Dokumen Spesifikasi Final):
  *   - GPIO 18 : Signal Motor Servo MG90S (1 Unit) -> Catu daya +5V TB-1512
  *   - GPIO 19 : Positif (+) Buzzer Aktif SFM-27
- *   - GPIO 21 : Jalur SDA I2C (SHT30 [0x44], OLED SSD1306 [0x3C], RTC DS3231 [0x68])
- *   - GPIO 22 : Jalur SCL I2C (SHT30 [0x44], OLED SSD1306 [0x3C], RTC DS3231 [0x68])
+ *   - GPIO 21 : Jalur SDA I2C-1 (SHT30 [0x44], OLED-1 SSD1306 [0x3C], RTC DS3231 [0x68])
+ *   - GPIO 22 : Jalur SCL I2C-1 (SHT30 [0x44], OLED-1 SSD1306 [0x3C], RTC DS3231 [0x68])
  *   - GPIO 25 : PWM / DIM Trigger RobotDyn AC Dimmer (Bohlam 60W)
  *   - GPIO 26 : Push Button Start - 1 Unit (INPUT_PULLUP, aktif LOW)
+ *   - GPIO 32 : Jalur SDA I2C-2 Khusus OLED-2 SSD1306 [0x3C] (Cara 1 - Tanpa Solder)
+ *   - GPIO 33 : Jalur SCL I2C-2 Khusus OLED-2 SSD1306 [0x3C] (Cara 1 - Tanpa Solder)
  *   - GPIO 34 : Z-C (Zero-Cross Detector) RobotDyn AC Dimmer (Input Interrupt)
  *
  * Library yang WAJIB Diinstal di Arduino IDE (Library Manager):
@@ -42,10 +44,12 @@
 // ============================================================================
 #define PIN_SERVO_MG90S     18  // Signal Motor Servo MG90S (1 Unit)
 #define PIN_BUZZER_SFM27    19  // Positif (+) Buzzer Aktif SFM-27
-#define PIN_I2C_SDA         21  // SDA Bersama (SHT30, OLED, RTC)
-#define PIN_I2C_SCL         22  // SCL Bersama (SHT30, OLED, RTC)
+#define PIN_I2C_SDA         21  // SDA Bus I2C-1 (SHT30, OLED-1, RTC)
+#define PIN_I2C_SCL         22  // SCL Bus I2C-1 (SHT30, OLED-1, RTC)
 #define PIN_DIMMER_DIM      25  // Output Trigger Gate Triac RobotDyn AC Dimmer
 #define PIN_BTN_START       26  // Push Button Start (INPUT_PULLUP)
+#define PIN_I2C2_SDA        32  // SDA Bus I2C-2 Khusus OLED-2 (Cara 1 - Tanpa Solder)
+#define PIN_I2C2_SCL        33  // SCL Bus I2C-2 Khusus OLED-2 (Cara 1 - Tanpa Solder)
 #define PIN_DIMMER_ZC       34  // Input Zero-Cross Detector RobotDyn AC Dimmer
 
 // Alamat I2C Perangkat (Agar Tidak Bentrok)
@@ -106,7 +110,8 @@ const unsigned long WIFI_CONNECT_TIMEOUT_MS = 30000UL; // Timeout uji Wi-Fi baru
 // 4. OBJEK PERANGKAT KERAS
 // ============================================================================
 Adafruit_SHT31    sht30 = Adafruit_SHT31();
-Adafruit_SSD1306  oled(OLED_WIDTH, OLED_HEIGHT, &Wire, OLED_RESET);
+Adafruit_SSD1306  oled(OLED_WIDTH, OLED_HEIGHT, &Wire, OLED_RESET);   // OLED-1 di Bus I2C-1 (GPIO 21/22)
+Adafruit_SSD1306  oled2(OLED_WIDTH, OLED_HEIGHT, &Wire1, OLED_RESET); // OLED-2 di Bus I2C-2 (GPIO 32/33)
 RTC_DS3231        rtc;
 Servo             mg90sServo;
 Preferences       prefs;
@@ -181,6 +186,7 @@ struct IncubatorState {
   // Status Perangkat I2C
   bool  sht30Available    = false;
   bool  oledAvailable     = false;
+  bool  oled2Available    = false;
   bool  rtcAvailable      = false;
 
   // Sensor & Target
@@ -715,7 +721,7 @@ void pollPhysicalSwitches() {
 }
 
 // ============================================================================
-// 12. LAYAR LOKAL OLED 0.96" SSD1306 (ALAMAT 0x3C) - TAMPILAN RAMAH AWAM
+// 12. LAYAR DUAL OLED 0.96" SSD1306 (CARA 1: BUS I2C-1 & BUS I2C-2)
 // ============================================================================
 void formatStartDateWib(time_t epochUtc, char* outBuf, size_t outSize) {
   if (epochUtc <= 0) {
@@ -729,78 +735,137 @@ void formatStartDateWib(time_t epochUtc, char* outBuf, size_t outSize) {
            timeinfo.tm_mday, timeinfo.tm_mon + 1, timeinfo.tm_year + 1900);
 }
 
+const char* getSesiLabel() {
+  if (state.incubationStatus == "running") {
+    if (state.stage == "lockdown") return "Tidak Putar";
+    if (state.motorRunning)        return "Sedang Putar";
+    return "Putar Telur";
+  }
+  if (state.incubationStatus == "finished") return "Siap Menetas";
+  return "Belum Jalan";
+}
+
+const char* getKoneksiLabel() {
+  if (WiFi.status() != WL_CONNECTED) return "Putus WiFi";
+  if (!state.backendChecked)         return "Mengecek..";
+  if (state.backendConnected)        return "Berhasil";
+  return "Gagal Web";
+}
+
+void renderSingleCombinedOled(Adafruit_SSD1306& disp, const char* startDateStr) {
+  disp.clearDisplay();
+  disp.setTextSize(1);
+  disp.setTextColor(SSD1306_WHITE);
+
+  disp.setCursor(0, 0);
+  disp.printf("Mulai  : %s", startDateStr);
+
+  disp.setCursor(0, 11);
+  if (state.incubationStatus == "running") {
+    disp.printf("Progres: Hari %d/21", state.currentDay);
+  } else if (state.incubationStatus == "finished") {
+    disp.print("Progres: Selesai 21H");
+  } else {
+    disp.print("Progres: 0/21 Hari");
+  }
+
+  disp.setCursor(0, 22);
+  disp.printf("Sesi   : %s", getSesiLabel());
+
+  disp.setCursor(0, 33);
+  if (state.sensorError) {
+    disp.print("Suhu   : Cek Sensor!");
+  } else {
+    disp.printf("Suhu   : %.1f C", state.temperature);
+  }
+
+  disp.setCursor(0, 44);
+  if (state.sensorError) {
+    disp.print("Lembap : Cek Sensor!");
+  } else {
+    disp.printf("Lembap : %.0f %%", state.humidity);
+  }
+
+  disp.setCursor(0, 55);
+  disp.printf("Koneksi: %s", getKoneksiLabel());
+
+  disp.display();
+}
+
 void updateOledDisplay() {
-  if (!state.oledAvailable) return;
+  if (!state.oledAvailable && !state.oled2Available) return;
 
-  oled.clearDisplay();
-  oled.setTextSize(1);
-  oled.setTextColor(SSD1306_WHITE);
-
-  // Baris 1 (y=0): Kapan Mulai (Tanggal Mulai WIB atau Belum Mulai)
   char startDateStr[16];
   if (state.incubationStatus == "running" || state.incubationStatus == "finished") {
     formatStartDateWib(state.startedAtEpoch, startDateStr, sizeof(startDateStr));
   } else {
     snprintf(startDateStr, sizeof(startDateStr), "Belum Mulai");
   }
-  oled.setCursor(0, 0);
-  oled.printf("Mulai  : %s", startDateStr);
 
-  // Baris 2 (y=11): Progres Hari Inkubasi (Hari ke-X dari 21 Hari)
-  oled.setCursor(0, 11);
-  if (state.incubationStatus == "running") {
-    oled.printf("Progres: Hari %d/21", state.currentDay);
-  } else if (state.incubationStatus == "finished") {
-    oled.print("Progres: Selesai 21H");
-  } else {
-    oled.print("Progres: 0/21 Hari");
-  }
+  // Jika kedua OLED terpasang (OLED-1 di GPIO 21/22 & OLED-2 di GPIO 32/33):
+  // - OLED-1 menampilkan Suhu, Kelembapan, dan Status Koneksi
+  // - OLED-2 menampilkan Kapan Mulai, Progres Hari, dan Sesi Inkubasi
+  if (state.oledAvailable && state.oled2Available) {
+    // --- LAYAR OLED 1 (GPIO 21 SDA, GPIO 22 SCL): SUHU, KELEMBAPAN & KONEKSI ---
+    oled.clearDisplay();
+    oled.setTextSize(1);
+    oled.setTextColor(SSD1306_WHITE);
 
-  // Baris 3 (y=22): Sesi Inkubasi (Putar Telur / Tidak Putar / Belum Jalan)
-  oled.setCursor(0, 22);
-  if (state.incubationStatus == "running") {
-    if (state.stage == "lockdown") {
-      oled.print("Sesi   : Tidak Putar");
-    } else if (state.motorRunning) {
-      oled.print("Sesi   : Sedang Putar");
+    oled.setCursor(10, 0);
+    oled.print("SUHU & KELEMBAPAN");
+    oled.drawLine(0, 11, 127, 11, SSD1306_WHITE);
+
+    oled.setCursor(0, 18);
+    if (state.sensorError) {
+      oled.print("Suhu   : Cek Sensor!");
     } else {
-      oled.print("Sesi   : Putar Telur");
+      oled.printf("Suhu   : %.1f C", state.temperature);
     }
-  } else if (state.incubationStatus == "finished") {
-    oled.print("Sesi   : Siap Menetas");
-  } else {
-    oled.print("Sesi   : Belum Jalan");
+
+    oled.setCursor(0, 34);
+    if (state.sensorError) {
+      oled.print("Lembap : Cek Sensor!");
+    } else {
+      oled.printf("Lembap : %.0f %%", state.humidity);
+    }
+
+    oled.setCursor(0, 50);
+    oled.printf("Koneksi: %s", getKoneksiLabel());
+    oled.display();
+
+    // --- LAYAR OLED 2 (GPIO 32 SDA, GPIO 33 SCL): MULAI, PROGRES & SESI ---
+    oled2.clearDisplay();
+    oled2.setTextSize(1);
+    oled2.setTextColor(SSD1306_WHITE);
+
+    oled2.setCursor(16, 0);
+    oled2.print("STATUS INKUBASI");
+    oled2.drawLine(0, 11, 127, 11, SSD1306_WHITE);
+
+    oled2.setCursor(0, 18);
+    oled2.printf("Mulai  : %s", startDateStr);
+
+    oled2.setCursor(0, 34);
+    if (state.incubationStatus == "running") {
+      oled2.printf("Progres: Hari %d/21", state.currentDay);
+    } else if (state.incubationStatus == "finished") {
+      oled2.print("Progres: Selesai 21H");
+    } else {
+      oled2.print("Progres: 0/21 Hari");
+    }
+
+    oled2.setCursor(0, 50);
+    oled2.printf("Sesi   : %s", getSesiLabel());
+    oled2.display();
+    return;
   }
 
-  // Baris 4 (y=33): Suhu Saat Ini
-  oled.setCursor(0, 33);
-  if (state.sensorError) {
-    oled.print("Suhu   : Cek Sensor!");
-  } else {
-    oled.printf("Suhu   : %.1f C", state.temperature);
+  // Fallback otomatis jika hanya 1 OLED yang sedang dicolok: tampilkan semua 6 baris
+  if (state.oledAvailable) {
+    renderSingleCombinedOled(oled, startDateStr);
+  } else if (state.oled2Available) {
+    renderSingleCombinedOled(oled2, startDateStr);
   }
-
-  // Baris 5 (y=44): Kelembapan Saat Ini
-  oled.setCursor(0, 44);
-  if (state.sensorError) {
-    oled.print("Lembap : Cek Sensor!");
-  } else {
-    oled.printf("Lembap : %.0f %%", state.humidity);
-  }
-
-  // Baris 6 (y=55): Status Koneksi (Wi-Fi & Server Web)
-  oled.setCursor(0, 55);
-  if (WiFi.status() != WL_CONNECTED) {
-    oled.print("Koneksi: Putus WiFi");
-  } else if (!state.backendChecked) {
-    oled.print("Koneksi: Mengecek..");
-  } else if (state.backendConnected) {
-    oled.print("Koneksi: Berhasil");
-  } else {
-    oled.print("Koneksi: Gagal Web");
-  }
-
-  oled.display();
 }
 
 // ============================================================================
@@ -1322,30 +1387,45 @@ void setup() {
   pinMode(PIN_BUZZER_SFM27, OUTPUT);
   digitalWrite(PIN_BUZZER_SFM27, LOW);
 
-  // 2. Inisialisasi Bus I2C Bersama (GPIO 21 = SDA, GPIO 22 = SCL)
+  // 2. Inisialisasi Bus I2C-1 (GPIO 21 = SDA, GPIO 22 = SCL) & Bus I2C-2 (GPIO 32 = SDA2, GPIO 33 = SCL2)
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+  Wire1.begin(PIN_I2C2_SDA, PIN_I2C2_SCL);
 
-  // [A] Sensor SHT30-D / SHT31-D (Alamat 0x44)
+  // [A] Sensor SHT30-D / SHT31-D (Alamat 0x44 di I2C-1)
   state.sht30Available = sht30.begin(I2C_ADDR_SHT30);
-  Serial.printf("[I2C] SHT30 (0x44): %s\n", state.sht30Available ? "OK" : "TIDAK TERDETEKSI");
+  Serial.printf("[I2C-1] SHT30  (0x44): %s\n", state.sht30Available ? "OK" : "TIDAK TERDETEKSI");
 
-  // [B] Layar OLED 0.96" SSD1306 (Alamat 0x3C)
+  // [B1] Layar OLED-1 0.96" SSD1306 (Alamat 0x3C di I2C-1: GPIO 21/22)
   state.oledAvailable = oled.begin(SSD1306_SWITCHCAPVCC, I2C_ADDR_OLED);
-  Serial.printf("[I2C] OLED  (0x3C): %s\n", state.oledAvailable ? "OK" : "TIDAK TERDETEKSI");
+  Serial.printf("[I2C-1] OLED-1 (0x3C): %s\n", state.oledAvailable ? "OK" : "TIDAK TERDETEKSI");
   if (state.oledAvailable) {
     oled.clearDisplay();
     oled.setTextSize(1);
     oled.setTextColor(SSD1306_WHITE);
     oled.setCursor(10, 24);
     oled.println("SMART HATCHERY IoT");
-    oled.setCursor(18, 38);
-    oled.println("Inisialisasi...");
+    oled.setCursor(12, 38);
+    oled.println("Layar 1: Siap...");
     oled.display();
   }
 
-  // [C] Modul Jam RTC DS3231SN (Alamat 0x68)
+  // [B2] Layar OLED-2 0.96" SSD1306 (Alamat 0x3C di I2C-2: GPIO 32/33)
+  state.oled2Available = oled2.begin(SSD1306_SWITCHCAPVCC, I2C_ADDR_OLED);
+  Serial.printf("[I2C-2] OLED-2 (0x3C): %s\n", state.oled2Available ? "OK" : "TIDAK TERDETEKSI");
+  if (state.oled2Available) {
+    oled2.clearDisplay();
+    oled2.setTextSize(1);
+    oled2.setTextColor(SSD1306_WHITE);
+    oled2.setCursor(10, 24);
+    oled2.println("SMART HATCHERY IoT");
+    oled2.setCursor(12, 38);
+    oled2.println("Layar 2: Siap...");
+    oled2.display();
+  }
+
+  // [C] Modul Jam RTC DS3231SN (Alamat 0x68 di I2C-1)
   state.rtcAvailable = rtc.begin(&Wire);
-  Serial.printf("[I2C] RTC   (0x68): %s\n", state.rtcAvailable ? "OK" : "TIDAK TERDETEKSI");
+  Serial.printf("[I2C-1] RTC    (0x68): %s\n", state.rtcAvailable ? "OK" : "TIDAK TERDETEKSI");
 
   // 3. Inisialisasi Servo MG90S (GPIO 18)
   mg90sServo.setPeriodHertz(50);
