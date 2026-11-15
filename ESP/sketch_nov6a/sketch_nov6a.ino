@@ -62,8 +62,8 @@
 // 2. KONFIGURASI JARINGAN, BACKEND GO FIBER, & IDENTITAS ALAT
 // ============================================================================
 const char* DEVICE_ID             = "inkubator-01";
-const char* DEFAULT_WIFI_SSID     = "RNP135G";
-const char* DEFAULT_WIFI_PASS     = "88998899";
+const char* DEFAULT_WIFI_SSID     = "Hoho";
+const char* DEFAULT_WIFI_PASS     = "0987654321";
 
 // URL Backend Utama (Custom Domain HTTPS) & Fallback Otomatis (Tailscale VPS "nandoz": 100.83.29.119)
 const char* BACKEND_TELEMETRY_URL = "https://itebaincubatortelur.cc.cd/api/device/telemetry";
@@ -711,8 +711,20 @@ void pollPhysicalSwitches() {
 }
 
 // ============================================================================
-// 12. LAYAR LOKAL OLED 0.96" SSD1306 (ALAMAT 0x3C)
+// 12. LAYAR LOKAL OLED 0.96" SSD1306 (ALAMAT 0x3C) - TAMPILAN RAMAH AWAM
 // ============================================================================
+void formatStartDateWib(time_t epochUtc, char* outBuf, size_t outSize) {
+  if (epochUtc <= 0) {
+    snprintf(outBuf, outSize, "Belum Mulai");
+    return;
+  }
+  time_t wibEpoch = epochUtc + (7 * 3600L); // WIB (UTC+7)
+  struct tm timeinfo;
+  gmtime_r(&wibEpoch, &timeinfo);
+  snprintf(outBuf, outSize, "%02d/%02d/%04d",
+           timeinfo.tm_mday, timeinfo.tm_mon + 1, timeinfo.tm_year + 1900);
+}
+
 void updateOledDisplay() {
   if (!state.oledAvailable) return;
 
@@ -720,46 +732,59 @@ void updateOledDisplay() {
   oled.setTextSize(1);
   oled.setTextColor(SSD1306_WHITE);
 
-  // Baris 1: Header Status Siklus & Wi-Fi
+  // Baris 1: Kapan Mulai (Tanggal Mulai WIB atau Belum Mulai)
+  char startDateStr[16];
+  if (state.incubationStatus == "running" || state.incubationStatus == "finished") {
+    formatStartDateWib(state.startedAtEpoch, startDateStr, sizeof(startDateStr));
+  } else {
+    snprintf(startDateStr, sizeof(startDateStr), "Belum Mulai");
+  }
   oled.setCursor(0, 0);
+  oled.printf("Mulai  : %s", startDateStr);
+
+  // Baris 2: Progres Hari Inkubasi (Hari ke-X dari 21 Hari)
+  oled.setCursor(0, 13);
   if (state.incubationStatus == "running") {
-    oled.printf("H-%02d/21 %s", state.currentDay,
-                (state.stage == "lockdown") ? "LOCK" : "TURN");
+    oled.printf("Progres: Hari %d/21", state.currentDay);
   } else if (state.incubationStatus == "finished") {
-    oled.print("SELESAI (21 HARI)");
+    oled.print("Progres: Selesai 21H");
   } else {
-    oled.print("STATUS: SIAP (IDLE)");
+    oled.print("Progres: 0/21 Hari");
   }
 
-  oled.setCursor(98, 0);
-  if (WiFi.status() == WL_CONNECTED) {
-    oled.print("WIFI");
-  } else {
-    oled.print("OFFL");
-  }
-  oled.drawLine(0, 10, 127, 10, SSD1306_WHITE);
-
-  // Baris 2: Suhu Aktual vs Target
-  oled.setCursor(0, 14);
-  if (state.sensorError) {
-    oled.print("Suhu  : SENSOR ERR!");
-  } else {
-    oled.printf("Suhu  : %.1f / %.1fC", state.temperature, state.targetTemperature);
-  }
-
-  // Baris 3: Kelembapan (%RH)
+  // Baris 3: Sesi Inkubasi (Putar Telur / Tidak Putar / Belum Jalan)
   oled.setCursor(0, 26);
-  oled.printf("Lembap: %.0f %%RH", state.humidity);
+  if (state.incubationStatus == "running") {
+    if (state.stage == "lockdown") {
+      oled.print("Sesi   : Tidak Putar");
+    } else if (state.motorRunning) {
+      oled.print("Sesi   : Sedang Putar");
+    } else {
+      oled.print("Sesi   : Putar Telur");
+    }
+  } else if (state.incubationStatus == "finished") {
+    oled.print("Sesi   : Siap Menetas");
+  } else {
+    oled.print("Sesi   : Belum Jalan");
+  }
 
-  // Baris 4: Status Lampu Pemanas (Bohlam 60W)
-  oled.setCursor(0, 38);
-  oled.printf("Lampu : %d%% (%s)", state.lampIntensity,
-              state.lampFuzzyActive ? "FUZZY" : "MAN");
+  oled.drawLine(0, 37, 127, 37, SSD1306_WHITE);
 
-  // Baris 5: Status Servo MG90S
-  oled.setCursor(0, 50);
-  oled.printf("Servo : %d deg (%s)", state.ventAngle,
-              state.ventFuzzyActive ? "FUZZY" : "MAN");
+  // Baris 4: Suhu Saat Ini
+  oled.setCursor(0, 41);
+  if (state.sensorError) {
+    oled.print("Suhu   : Cek Sensor!");
+  } else {
+    oled.printf("Suhu   : %.1f C", state.temperature);
+  }
+
+  // Baris 5: Kelembapan Saat Ini
+  oled.setCursor(0, 54);
+  if (state.sensorError) {
+    oled.print("Lembap : Cek Sensor!");
+  } else {
+    oled.printf("Lembap : %.0f %%", state.humidity);
+  }
 
   oled.display();
 }
