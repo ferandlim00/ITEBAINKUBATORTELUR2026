@@ -3,23 +3,32 @@
  * SMART HATCHERY MONITORING - FIRMWARE ESP32 DOIT DEVKIT V1 (30-PIN)
  * (Revisi Final: Tanpa Motor Stepper, 1 Servo MG90S, & 1 Push Button Start)
  * ============================================================================
- * Mapping Pin Hardware (Sesuai Dokumen Spesifikasi Final):
+ * Mapping Pin Hardware (Sesuai Dokumen Spesifikasi Final & Dual OLED):
+ *   - GPIO 16 : Jalur SDA2 I2C-2 Khusus OLED-2 SSD1306 [0x3C] (Pin RX2)
+ *   - GPIO 17 : Jalur SCL2 I2C-2 Khusus OLED-2 SSD1306 [0x3C] (Pin TX2)
  *   - GPIO 18 : Signal Motor Servo MG90S (1 Unit) -> Catu daya +5V TB-1512
  *   - GPIO 19 : Positif (+) Buzzer Aktif SFM-27
- *   - GPIO 21 : Jalur SDA I2C-1 (SHT30 [0x44], OLED-1 SSD1306 [0x3C], RTC DS3231 [0x68])
- *   - GPIO 22 : Jalur SCL I2C-1 (SHT30 [0x44], OLED-1 SSD1306 [0x3C], RTC DS3231 [0x68])
+ *   - GPIO 21 : Jalur SDA1 I2C-1 (SHT30 [0x44], OLED-1 SSD1306 [0x3C], RTC DS3231 [0x68])
+ *   - GPIO 22 : Jalur SCL1 I2C-1 (SHT30 [0x44], OLED-1 SSD1306 [0x3C], RTC DS3231 [0x68])
  *   - GPIO 25 : PWM / DIM Trigger RobotDyn AC Dimmer (Bohlam 60W)
- *   - GPIO 26 : Push Button Start - 1 Unit (INPUT_PULLUP, aktif LOW)
- *   - GPIO 32 : Jalur SDA I2C-2 Khusus OLED-2 SSD1306 [0x3C] (Cara 1 - Tanpa Solder)
- *   - GPIO 33 : Jalur SCL I2C-2 Khusus OLED-2 SSD1306 [0x3C] (Cara 1 - Tanpa Solder)
+ *   - GPIO 26 : Push Button Start Utama (INPUT_PULLUP, aktif LOW) + dukungan GPIO 4 (Simulasi)
  *   - GPIO 34 : Z-C (Zero-Cross Detector) RobotDyn AC Dimmer (Input Interrupt)
  *
- * Library yang WAJIB Diinstal di Arduino IDE (Library Manager):
- *   1. ArduinoJson            (oleh Benoit Blanchon, versi 7.x)
- *   2. Adafruit SHT31 Library (oleh Adafruit - kompatibel penuh dengan SHT30/SHT31)
- *   3. Adafruit SSD1306       (oleh Adafruit) + Adafruit GFX Library
- *   4. RTClib                 (oleh Adafruit - untuk RTC DS3231SN)
- *   5. ESP32Servo             (oleh Kevin Harrington / John K. Bennett)
+ * ============================================================================
+ * DAFTAR LENGKAP LIBRARY YANG DIBUTUHKAN DI ARDUINO IDE:
+ * ============================================================================
+ * A. Library Eksternal (WAJIB Diinstal via Tools > Manage Libraries...):
+ *   1. ArduinoJson            (oleh Benoit Blanchon, versi 7.x)       -> Header: <ArduinoJson.h>
+ *   2. Adafruit SHT31 Library (oleh Adafruit, versi 2.2.x+)           -> Header: <Adafruit_SHT31.h>
+ *   3. Adafruit GFX Library   (oleh Adafruit, versi 1.11.x+)          -> Header: <Adafruit_GFX.h>
+ *   4. Adafruit SSD1306       (oleh Adafruit, versi 2.5.x+)           -> Header: <Adafruit_SSD1306.h>
+ *   5. Adafruit BusIO         (oleh Adafruit, dependensi wajib I2C)   -> Dipakai oleh SHT31, SSD1306, GFX, RTClib
+ *   6. RTClib                 (oleh Adafruit, versi 2.1.x+)           -> Header: <RTClib.h>
+ *   7. ESP32Servo             (oleh Kevin Harrington / John K. Bennett)-> Header: <ESP32Servo.h>
+ *
+ * B. Library Bawaan Core ESP32 (Otomatis Ada Saat Install Board "esp32 by Espressif Systems"):
+ *   - <Arduino.h>, <Wire.h>, <WiFi.h>, <WiFiClientSecure.h>, <HTTPClient.h>,
+ *     <Preferences.h>, <time.h>, <esp_arduino_version.h>, <soc/gpio_struct.h>
  * ============================================================================
  */
 
@@ -42,14 +51,15 @@
 // ============================================================================
 // 1. DEFINISI PIN GPIO ESP32 DOIT (30-PIN) - SESUAI MAPPING REVISI FINAL
 // ============================================================================
+#define PIN_I2C2_SDA        16  // RX2 - SDA Bus I2C-2 Khusus OLED-2 (0x3C)
+#define PIN_I2C2_SCL        17  // TX2 - SCL Bus I2C-2 Khusus OLED-2 (0x3C)
 #define PIN_SERVO_MG90S     18  // Signal Motor Servo MG90S (1 Unit)
 #define PIN_BUZZER_SFM27    19  // Positif (+) Buzzer Aktif SFM-27
 #define PIN_I2C_SDA         21  // SDA Bus I2C-1 (SHT30, OLED-1, RTC)
 #define PIN_I2C_SCL         22  // SCL Bus I2C-1 (SHT30, OLED-1, RTC)
 #define PIN_DIMMER_DIM      25  // Output Trigger Gate Triac RobotDyn AC Dimmer
-#define PIN_BTN_START       26  // Push Button Start (INPUT_PULLUP)
-#define PIN_I2C2_SDA        32  // SDA Bus I2C-2 Khusus OLED-2 (Cara 1 - Tanpa Solder)
-#define PIN_I2C2_SCL        33  // SCL Bus I2C-2 Khusus OLED-2 (Cara 1 - Tanpa Solder)
+#define PIN_BTN_START       26  // Push Button Start Hardware (INPUT_PULLUP)
+#define PIN_BTN_START_ALT   4   // Push Button Start Alternatif/Simulasi (INPUT_PULLUP)
 #define PIN_DIMMER_ZC       34  // Input Zero-Cross Detector RobotDyn AC Dimmer
 
 // Alamat I2C Perangkat (Agar Tidak Bentrok)
@@ -109,9 +119,10 @@ const unsigned long WIFI_CONNECT_TIMEOUT_MS = 30000UL; // Timeout uji Wi-Fi baru
 // ============================================================================
 // 4. OBJEK PERANGKAT KERAS
 // ============================================================================
-Adafruit_SHT31    sht30 = Adafruit_SHT31();
-Adafruit_SSD1306  oled(OLED_WIDTH, OLED_HEIGHT, &Wire, OLED_RESET);   // OLED-1 di Bus I2C-1 (GPIO 21/22)
-Adafruit_SSD1306  oled2(OLED_WIDTH, OLED_HEIGHT, &Wire1, OLED_RESET); // OLED-2 di Bus I2C-2 (GPIO 32/33)
+TwoWire           I2C_Dua = TwoWire(1);
+Adafruit_SHT31    sht30   = Adafruit_SHT31();
+Adafruit_SSD1306  oled(OLED_WIDTH, OLED_HEIGHT, &Wire, OLED_RESET);     // OLED-1 di Bus I2C-1 (GPIO 21/22)
+Adafruit_SSD1306  oled2(OLED_WIDTH, OLED_HEIGHT, &I2C_Dua, OLED_RESET); // OLED-2 di Bus I2C-2 (GPIO 16/17)
 RTC_DS3231        rtc;
 Servo             mg90sServo;
 Preferences       prefs;
@@ -646,8 +657,24 @@ void evaluateFuzzyControl() {
 }
 
 // ============================================================================
-// 11. INPUT TOMBOL FISIK (PUSH BUTTON START GPIO 26)
+// 11. INPUT TOMBOL FISIK (PUSH BUTTON START GPIO 26 & GPIO 4)
 // ============================================================================
+void tampilSplashSiklusDimulai() {
+  Adafruit_SSD1306* targetDisp = state.oled2Available ? &oled2 : (state.oledAvailable ? &oled : nullptr);
+  if (targetDisp == nullptr) return;
+
+  targetDisp->clearDisplay();
+  targetDisp->drawFastHLine(0, 15, 128, SSD1306_WHITE);
+  targetDisp->setTextColor(SSD1306_WHITE);
+  targetDisp->setTextSize(1);
+  targetDisp->setCursor(22, 22);
+  targetDisp->print("SIKLUS DIMULAI");
+  targetDisp->setTextSize(2);
+  targetDisp->setCursor(16, 35);
+  targetDisp->print("DAY 01/21");
+  targetDisp->display();
+}
+
 void startIncubationLocalOrRemote() {
   time_t now             = getCurrentEpoch();
   state.incubationStatus = "running";
@@ -660,6 +687,7 @@ void startIncubationLocalOrRemote() {
   state.encoderOk        = true;
   state.turningStatus    = "idle";
   saveSettingsToNVS();
+  tampilSplashSiklusDimulai();
   Serial.println("[INKUBASI] Siklus 21 hari DIMULAI.");
 }
 
@@ -679,8 +707,9 @@ void stopIncubationLocalOrRemote() {
 }
 
 void pollPhysicalSwitches() {
-  // Push Button Start (GPIO 26 - INPUT_PULLUP, Aktif LOW)
-  bool reading = digitalRead(PIN_BTN_START);
+  // Mendukung Push Button Start di GPIO 26 (Hardware) maupun GPIO 4 (Simulasi/Alternatif)
+  bool pressed = (digitalRead(PIN_BTN_START) == LOW) || (digitalRead(PIN_BTN_START_ALT) == LOW);
+  bool reading = pressed ? LOW : HIGH;
   unsigned long nowMs = millis();
 
   if (reading != lastBtnReading) {
@@ -721,258 +750,180 @@ void pollPhysicalSwitches() {
 }
 
 // ============================================================================
-// 12. LAYAR DUAL OLED 0.96" SSD1306
-//     - LAYAR 1: WiFi (Terhubung/Gagal + Ikon & Bar Sinyal) + Angka Besar Suhu & Lembap
-//     - LAYAR 2: Tulisan Besar Berganti Tiap 5 Detik (Mulai -> Progres -> Sesi Jadwal)
+// 12. LAYAR DUAL OLED 0.96" SSD1306 (BITMAP IKON TERMO, TELUR & WIFI LENGKUNG)
+//     - OLED 1 (GPIO 21/22): Ikon Termo + "Inkubator" + Jam WIB | Suhu + Telur + Lembab%
+//     - OLED 2 (GPIO 16/17): Ikon WiFi + dBm/OFFLINE + SETTER/LOCKDOWN | DAY XX/21 | Mulai
 // ============================================================================
-void formatStartDateWib(time_t epochUtc, char* outBuf, size_t outSize) {
+const unsigned char ICON_THERMO[] PROGMEM = {
+  0x18, 0x24, 0x24, 0x2C, 0x24, 0x2C, 0x24, 0x42, 0x5A, 0x5A, 0x42, 0x3C
+};
+
+const unsigned char ICON_TELUR[] PROGMEM = {
+  0x03, 0xC0, 0x07, 0xE0, 0x0F, 0xF0, 0x1C, 0xF8, 0x19, 0xF8,
+  0x3B, 0xFC, 0x37, 0xFC, 0x3F, 0xFC, 0x7F, 0xFE, 0x7F, 0xFE,
+  0x7F, 0xFE, 0x7F, 0xFE, 0x7F, 0xFE, 0x7F, 0xFE, 0x3F, 0xFC,
+  0x3F, 0xFC, 0x1F, 0xF8, 0x0F, 0xF0, 0x07, 0xE0, 0x00, 0x00
+};
+
+// Bitmap Ikon Wi-Fi Lengkungan (12x10 px)
+const unsigned char ICON_WIFI_3[] PROGMEM = {
+  0x3F, 0xC0, 0x60, 0x60, 0x80, 0x10, 0x1F, 0x80, 0x30, 0xC0,
+  0x0F, 0x00, 0x19, 0x80, 0x00, 0x00, 0x06, 0x00, 0x06, 0x00
+};
+const unsigned char ICON_WIFI_2[] PROGMEM = {
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1F, 0x80, 0x30, 0xC0,
+  0x0F, 0x00, 0x19, 0x80, 0x00, 0x00, 0x06, 0x00, 0x06, 0x00
+};
+const unsigned char ICON_WIFI_1[] PROGMEM = {
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x0F, 0x00, 0x19, 0x80, 0x00, 0x00, 0x06, 0x00, 0x06, 0x00
+};
+const unsigned char ICON_WIFI_0[] PROGMEM = {
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x80,
+  0x09, 0x00, 0x06, 0x00, 0x09, 0x00, 0x10, 0x80, 0x00, 0x00
+};
+
+int hitungLevelWiFi(int rssi) {
+  if (WiFi.status() != WL_CONNECTED || rssi == 0 || rssi <= -95) return 0;
+  if (rssi >= -60) return 3;
+  if (rssi >= -76) return 2;
+  return 1;
+}
+
+void formatClockWib(time_t epochUtc, char* outBuf, size_t outSize) {
+  time_t wibEpoch = epochUtc + (7 * 3600L); // WIB (UTC+7)
+  struct tm timeinfo;
+  gmtime_r(&wibEpoch, &timeinfo);
+  snprintf(outBuf, outSize, "%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min);
+}
+
+void formatStartDateTimeWib(time_t epochUtc, char* outBuf, size_t outSize) {
   if (epochUtc <= 0) {
-    snprintf(outBuf, outSize, "BLM MULAI");
+    snprintf(outBuf, outSize, "Mulai: Belum Dimulai");
     return;
   }
   time_t wibEpoch = epochUtc + (7 * 3600L); // WIB (UTC+7)
   struct tm timeinfo;
   gmtime_r(&wibEpoch, &timeinfo);
-  snprintf(outBuf, outSize, "%02d/%02d/%04d",
-           timeinfo.tm_mday, timeinfo.tm_mon + 1, timeinfo.tm_year + 1900);
+  snprintf(outBuf, outSize, "Mulai:%02d/%02d/%02d %02d:%02d",
+           timeinfo.tm_mday,
+           timeinfo.tm_mon + 1,
+           (timeinfo.tm_year + 1900) % 100,
+           timeinfo.tm_hour,
+           timeinfo.tm_min);
 }
 
-void formatShortStartDateWib(time_t epochUtc, char* outBuf, size_t outSize) {
-  if (epochUtc <= 0) {
-    snprintf(outBuf, outSize, "Blm Mulai");
-    return;
-  }
-  time_t wibEpoch = epochUtc + (7 * 3600L); // WIB (UTC+7)
-  struct tm timeinfo;
-  gmtime_r(&wibEpoch, &timeinfo);
-  snprintf(outBuf, outSize, "%02d/%02d", timeinfo.tm_mday, timeinfo.tm_mon + 1);
-}
-
-const char* getSesiLabel() {
-  if (state.incubationStatus == "running") {
-    if (state.stage == "lockdown") return "Tidak Putar";
-    if (state.motorRunning)        return "Sedang Putar";
-    return "Putar Telur";
-  }
-  if (state.incubationStatus == "finished") return "Siap Menetas";
-  return "Belum Jalan";
-}
-
-// Menggambar Ikon Pemancar Wi-Fi + 4 Bar Kekuatan Sinyal (mendeteksi RSSI Wi-Fi)
-void drawWifiIconAndBars(Adafruit_SSD1306& disp, int x, int y) {
-  // Ikon antena/pemancar Wi-Fi di kiri bar
-  disp.drawLine(x, y + 1, x + 6, y + 1, SSD1306_WHITE);
-  disp.drawLine(x, y + 1, x + 3, y + 5, SSD1306_WHITE);
-  disp.drawLine(x + 6, y + 1, x + 3, y + 5, SSD1306_WHITE);
-  disp.drawFastVLine(x + 3, y + 5, 5, SSD1306_WHITE);
-
-  int bars = 0;
-  if (WiFi.status() == WL_CONNECTED) {
-    long rssi = WiFi.RSSI();
-    if (rssi >= -60)      bars = 4; // Sinyal Sangat Kuat
-    else if (rssi >= -70) bars = 3; // Sinyal Kuat
-    else if (rssi >= -80) bars = 2; // Sinyal Sedang
-    else                  bars = 1; // Sinyal Lemah
-  }
-
-  // Gambar 4 bar bertingkat (tinggi 3, 5, 7, 9 piksel)
-  for (int i = 0; i < 4; i++) {
-    int bh = (i + 1) * 2 + 1;
-    int bx = x + 9 + (i * 4);
-    int by = y + 10 - bh;
-    if (i < bars) {
-      disp.fillRect(bx, by, 2, bh, SSD1306_WHITE); // Bar terisi penuh sesuai kekuatan sinyal
-    } else {
-      disp.drawFastHLine(bx, y + 9, 2, SSD1306_WHITE); // Tapak kosong jika sinyal belum sampai/gagal
-    }
-  }
-
-  // Jika Wi-Fi gagal/putus, tambahkan tanda silang kecil di atas bar kosong
-  if (WiFi.status() != WL_CONNECTED) {
-    disp.drawLine(x + 11, y + 1, x + 17, y + 6, SSD1306_WHITE);
-    disp.drawLine(x + 17, y + 1, x + 11, y + 6, SSD1306_WHITE);
-  }
-}
-
-// Menggambar blok angka besar Suhu (Kiri) & Kelembapan (Kanan) + Garis Bawah + Label
-void drawBigTempHumiditySection(Adafruit_SSD1306& disp, int numY, int lineY, int labelY) {
-  disp.setTextColor(SSD1306_WHITE);
-
-  // 1. Angka Besar Suhu (Kiri) & Kelembapan (Kanan) dengan TextSize(2)
-  disp.setTextSize(2);
-  if (state.sensorError) {
-    disp.setCursor(8, numY);
-    disp.print("ERR");
-    disp.setCursor(80, numY);
-    disp.print("ERR");
-  } else {
-    disp.setCursor(4, numY);
-    disp.printf("%.1f", state.temperature);
-
-    disp.setCursor(78, numY);
-    disp.printf("%.0f%%", state.humidity);
-  }
-
-  // 2. Garis bawah kembar di bawah angka Suhu & Kelembapan
-  disp.drawFastHLine(4, lineY, 50, SSD1306_WHITE);
-  disp.drawFastHLine(74, lineY, 50, SSD1306_WHITE);
-
-  // 3. Label keterangan di bawah garis ("Suhu (C)" dan "Lembap")
-  disp.setTextSize(1);
-  disp.setCursor(6, labelY);
-  disp.print("Suhu (C)");
-
-  disp.setCursor(80, labelY);
-  disp.print("Lembap");
-}
-
-// Merender Layar 2: Tulisan Besar yang berganti otomatis setiap 5 detik
-void renderRotatingStatusOled(Adafruit_SSD1306& disp) {
+void tampilOLED1(Adafruit_SSD1306& disp) {
   disp.clearDisplay();
   disp.setTextColor(SSD1306_WHITE);
 
-  int slide = (int)((millis() / 5000UL) % 3UL); // Berganti tiap 5 detik: 0 -> 1 -> 2
+  // --- BARIS ATAS: IKON TERMO + JUDUL "Inkubator" + JAM WIB ---
+  disp.drawBitmap(2, 2, ICON_THERMO, 8, 12, SSD1306_WHITE);
+  disp.setTextSize(1);
+  disp.setCursor(14, 4);
+  disp.print("Inkubator");
 
-  if (slide == 0) {
-    // --- SLIDE 1 (0-5 Detik): KAPAN MULAI ---
-    disp.setTextSize(1);
-    disp.setCursor(0, 2);
-    disp.print("KAPAN MULAI     [1/3]");
-    disp.drawFastHLine(0, 12, 128, SSD1306_WHITE);
+  char clockBuf[8];
+  formatClockWib(getCurrentEpoch(), clockBuf, sizeof(clockBuf));
+  disp.setCursor(95, 4);
+  disp.print(clockBuf);
 
-    char startDateStr[16];
-    if (state.incubationStatus == "running" || state.incubationStatus == "finished") {
-      formatStartDateWib(state.startedAtEpoch, startDateStr, sizeof(startDateStr));
-      disp.setTextSize(2);
-      disp.setCursor(4, 23);
-      disp.print(startDateStr);
+  // --- GARIS PEMISAH HORIZONTAL ---
+  disp.drawFastHLine(0, 15, 128, SSD1306_WHITE);
 
-      disp.setTextSize(1);
-      disp.setCursor(10, 49);
-      disp.print("Tanggal Mulai (WIB)");
-    } else {
-      disp.setTextSize(2);
-      disp.setCursor(10, 23);
-      disp.print("BLM MULAI");
-
-      disp.setTextSize(1);
-      disp.setCursor(10, 49);
-      disp.print("Tekan Tombol / Web");
-    }
+  // KIRI: SUHU (Area x = 4..51)
+  disp.setTextSize(2);
+  disp.setCursor(4, 24);
+  if (state.sensorError) {
+    disp.print("ERR");
+  } else {
+    disp.print(state.temperature, 1);
   }
-  else if (slide == 1) {
-    // --- SLIDE 2 (5-10 Detik): PROGRES HARI ---
+  disp.drawFastHLine(4, 44, 48, SSD1306_WHITE);
+  disp.setTextSize(1);
+  disp.setCursor(16, 49);
+  disp.print("Suhu");
+
+  // TENGAH: IKON TELUR (x = 56..71)
+  disp.drawBitmap(56, 29, ICON_TELUR, 16, 20, SSD1306_WHITE);
+
+  // KANAN: KELEMBAPAN (Area x = 76..123)
+  disp.setTextSize(2);
+  disp.setCursor(85, 24);
+  if (state.sensorError) {
+    disp.print("ERR");
+  } else {
+    disp.print((int)round(state.humidity));
     disp.setTextSize(1);
-    disp.setCursor(0, 2);
-    disp.print("PROGRES HARI    [2/3]");
-    disp.drawFastHLine(0, 12, 128, SSD1306_WHITE);
-
-    if (state.incubationStatus == "running") {
-      disp.setTextSize(2);
-      disp.setCursor((state.currentDay >= 10) ? 4 : 10, 23);
-      disp.printf("HARI %d/21", state.currentDay);
-
-      int sisaHari = max(0, INCUBATION_TOTAL_DAYS - state.currentDay);
-      disp.setTextSize(1);
-      disp.setCursor(16, 49);
-      disp.printf("Sisa %d Hari Lagi", sisaHari);
-    } else if (state.incubationStatus == "finished") {
-      disp.setTextSize(2);
-      disp.setCursor(16, 23);
-      disp.print("SELESAI!");
-
-      disp.setTextSize(1);
-      disp.setCursor(16, 49);
-      disp.print("Genap 21 Hari Penuh");
-    } else {
-      disp.setTextSize(2);
-      disp.setCursor(10, 23);
-      disp.print("0/21 HARI");
-
-      disp.setTextSize(1);
-      disp.setCursor(10, 49);
-      disp.print("Siklus Belum Jalan");
-    }
+    disp.print("%");
   }
-  else {
-    // --- SLIDE 3 (10-15 Detik): SESI JADWAL ---
-    disp.setTextSize(1);
-    disp.setCursor(0, 2);
-    disp.print("SESI JADWAL     [3/3]");
-    disp.drawFastHLine(0, 12, 128, SSD1306_WHITE);
-
-    if (state.incubationStatus == "running") {
-      if (state.stage == "lockdown") {
-        disp.setTextSize(2);
-        disp.setCursor(10, 23);
-        disp.print("TDK PUTAR");
-
-        disp.setTextSize(1);
-        disp.setCursor(10, 49);
-        disp.print("Masa Tenang H19-21");
-      } else if (state.motorRunning) {
-        disp.setTextSize(2);
-        disp.setCursor(22, 23);
-        disp.print("MEMUTAR");
-
-        disp.setTextSize(1);
-        disp.setCursor(10, 49);
-        disp.print("Rak Sedang Berputar");
-      } else {
-        disp.setTextSize(2);
-        disp.setCursor(34, 23);
-        disp.print("PUTAR");
-
-        disp.setTextSize(1);
-        disp.setCursor(6, 49);
-        disp.printf("Jadwal Tiap %d Menit", state.motorIntervalMinutes);
-      }
-    } else if (state.incubationStatus == "finished") {
-      disp.setTextSize(2);
-      disp.setCursor(22, 23);
-      disp.print("MENETAS");
-
-      disp.setTextSize(1);
-      disp.setCursor(16, 49);
-      disp.print("Siap Menetas (21H)");
-    } else {
-      disp.setTextSize(2);
-      disp.setCursor(34, 23);
-      disp.print("SIAGA");
-
-      disp.setTextSize(1);
-      disp.setCursor(16, 49);
-      disp.print("Menunggu Dimulai");
-    }
-  }
+  disp.drawFastHLine(76, 44, 48, SSD1306_WHITE);
+  disp.setTextSize(1);
+  disp.setCursor(82, 49);
+  disp.print("Lembab");
 
   disp.display();
 }
 
-// Fallback jika hanya 1 OLED yang dicolok
-void renderSingleCombinedOled(Adafruit_SSD1306& disp) {
+void tampilOLED2(Adafruit_SSD1306& disp) {
   disp.clearDisplay();
-  disp.setTextSize(1);
   disp.setTextColor(SSD1306_WHITE);
+  disp.setTextSize(1);
 
-  disp.setCursor(0, 2);
-  if (WiFi.status() == WL_CONNECTED) {
-    disp.print("WiFi: Terhubung");
+  // --- BARIS ATAS: IKON WIFI LENGKUNGAN + RSSI & LABEL FASE ---
+  int rssi  = (WiFi.status() == WL_CONNECTED) ? (int)WiFi.RSSI() : 0;
+  int level = hitungLevelWiFi(rssi);
+
+  const unsigned char* ikonWifi = ICON_WIFI_0;
+  if (level == 3)      ikonWifi = ICON_WIFI_3;
+  else if (level == 2) ikonWifi = ICON_WIFI_2;
+  else if (level == 1) ikonWifi = ICON_WIFI_1;
+
+  disp.drawBitmap(2, 2, ikonWifi, 12, 10, SSD1306_WHITE);
+
+  disp.setCursor(17, 3);
+  if (level == 0) {
+    disp.print("OFFLINE");
   } else {
-    disp.print("WiFi: Gagal");
+    disp.print(rssi);
+    disp.print("dBm");
   }
-  drawWifiIconAndBars(disp, 102, 0);
 
-  drawBigTempHumiditySection(disp, 16, 35, 39);
-
-  char shortDate[12];
-  formatShortStartDateWib(state.startedAtEpoch, shortDate, sizeof(shortDate));
-  disp.setCursor(0, 54);
-  if (state.incubationStatus == "running") {
-    disp.printf("%s H-%d/21 %s", shortDate, state.currentDay, getSesiLabel());
+  disp.setCursor(76, 3);
+  if (state.incubationStatus == "idle") {
+    disp.print(" SIAGA  ");
+  } else if (state.incubationStatus == "finished") {
+    disp.print("SELESAI ");
+  } else if (state.stage == "lockdown" || state.currentDay >= 18) {
+    disp.print("LOCKDOWN");
   } else {
-    disp.printf("Sesi: %s", getSesiLabel());
+    disp.print(" SETTER ");
   }
+
+  // --- GARIS PEMISAH HORIZONTAL ---
+  disp.drawFastHLine(0, 15, 128, SSD1306_WHITE);
+
+  // Teks Utama Hari Inkubasi (Rata Tengah)
+  disp.setTextSize(2);
+  char dayBuf[16];
+  int displayDay = (state.incubationStatus == "finished") ? INCUBATION_TOTAL_DAYS : state.currentDay;
+  snprintf(dayBuf, sizeof(dayBuf), "DAY %02d/21", displayDay);
+  disp.setCursor(10, 23);
+  disp.print(dayBuf);
+
+  // Garis Pemisah Halus antara DAY dan Waktu Start
+  disp.drawFastHLine(10, 43, 108, SSD1306_WHITE);
+
+  // Informasi Waktu Start (Tanggal/Bulan/Tahun Jam:Menit WIB)
+  disp.setTextSize(1);
+  char startBuf[24];
+  if (state.incubationStatus == "running" || state.incubationStatus == "finished") {
+    formatStartDateTimeWib(state.startedAtEpoch, startBuf, sizeof(startBuf));
+  } else {
+    snprintf(startBuf, sizeof(startBuf), "Mulai: Belum Dimulai");
+  }
+  disp.setCursor(4, 49);
+  disp.print(startBuf);
 
   disp.display();
 }
@@ -980,42 +931,19 @@ void renderSingleCombinedOled(Adafruit_SSD1306& disp) {
 void updateOledDisplay() {
   if (!state.oledAvailable && !state.oled2Available) return;
 
-  // Jika kedua OLED terpasang (OLED-1 di GPIO 21/22 & OLED-2 di GPIO 32/33):
+  // Jika kedua OLED terpasang (OLED-1 di GPIO 21/22 & OLED-2 di GPIO 16/17):
   if (state.oledAvailable && state.oled2Available) {
-    // =========================================================================
-    // LAYAR OLED 1 (GPIO 21/22): WIFI (TERHUBUNG/GAGAL + IKON BAR) & SUHU/LEMBAP
-    // =========================================================================
-    oled.clearDisplay();
-    oled.setTextSize(1);
-    oled.setTextColor(SSD1306_WHITE);
-
-    // Baris Atas: Kata "WiFi: Terhubung" / "WiFi: Gagal" diikuti Ikon Wi-Fi + Bar Sinyal
-    oled.setCursor(0, 2);
-    if (WiFi.status() == WL_CONNECTED) {
-      oled.print("WiFi: Terhubung");
-    } else {
-      oled.print("WiFi: Gagal");
-    }
-    drawWifiIconAndBars(oled, 102, 0);
-    oled.drawFastHLine(0, 12, 128, SSD1306_WHITE);
-
-    // Bagian Tengah & Bawah: Angka Besar Suhu (Kiri) & Kelembapan (Kanan) + Garis + Label
-    drawBigTempHumiditySection(oled, 21, 41, 47);
-
-    oled.display();
-
-    // =========================================================================
-    // LAYAR OLED 2 (GPIO 32/33): TULISAN BESAR BERGANTI TIAP 5 DETIK
-    // =========================================================================
-    renderRotatingStatusOled(oled2);
+    tampilOLED1(oled);
+    tampilOLED2(oled2);
     return;
   }
 
-  // Fallback otomatis jika hanya 1 OLED yang sedang dicolok
-  if (state.oledAvailable) {
-    renderSingleCombinedOled(oled);
-  } else if (state.oled2Available) {
-    renderSingleCombinedOled(oled2);
+  // Jika hanya 1 OLED yang sedang dicolok, bergantian tampilkan OLED 1 & OLED 2 tiap 5 detik
+  Adafruit_SSD1306& activeDisp = state.oledAvailable ? oled : oled2;
+  if (((millis() / 5000UL) % 2UL) == 0UL) {
+    tampilOLED1(activeDisp);
+  } else {
+    tampilOLED2(activeDisp);
   }
 }
 
@@ -1533,14 +1461,15 @@ void setup() {
 
   loadSettingsFromNVS();
 
-  // 1. Konfigurasi Pin Tombol Start dan Buzzer
+  // 1. Konfigurasi Pin Tombol Start (GPIO 26 & GPIO 4) dan Buzzer
   pinMode(PIN_BTN_START, INPUT_PULLUP);
+  pinMode(PIN_BTN_START_ALT, INPUT_PULLUP);
   pinMode(PIN_BUZZER_SFM27, OUTPUT);
   digitalWrite(PIN_BUZZER_SFM27, LOW);
 
-  // 2. Inisialisasi Bus I2C-1 (GPIO 21 = SDA, GPIO 22 = SCL) & Bus I2C-2 (GPIO 32 = SDA2, GPIO 33 = SCL2)
+  // 2. Inisialisasi Bus I2C-1 (GPIO 21 = SDA, GPIO 22 = SCL) & Bus I2C-2 (GPIO 16 = SDA2, GPIO 17 = SCL2)
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
-  Wire1.begin(PIN_I2C2_SDA, PIN_I2C2_SCL);
+  I2C_Dua.begin(PIN_I2C2_SDA, PIN_I2C2_SCL);
 
   // [A] Sensor SHT30-D / SHT31-D (Alamat 0x44 di I2C-1)
   state.sht30Available = sht30.begin(I2C_ADDR_SHT30);
@@ -1560,7 +1489,7 @@ void setup() {
     oled.display();
   }
 
-  // [B2] Layar OLED-2 0.96" SSD1306 (Alamat 0x3C di I2C-2: GPIO 32/33)
+  // [B2] Layar OLED-2 0.96" SSD1306 (Alamat 0x3C di I2C-2: GPIO 16/17)
   state.oled2Available = oled2.begin(SSD1306_SWITCHCAPVCC, I2C_ADDR_OLED);
   Serial.printf("[I2C-2] OLED-2 (0x3C): %s\n", state.oled2Available ? "OK" : "TIDAK TERDETEKSI");
   if (state.oled2Available) {

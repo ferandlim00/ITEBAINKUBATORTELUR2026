@@ -84,7 +84,7 @@ Agar aplikasi Web Frontend dan Kontrak API Backend tetap kompatibel tanpa perlu 
 
 ## 2. Penjelasan Detail Firmware Arduino / ESP32
 
-Kode sumber utama berada di [`ESP/sketch_nov6a/sketch_nov6a.ino`](file:///c:/ITIOT/ESP/sketch_nov6a/sketch_nov6a.ino), disertai panduan setup board, 5 library (termasuk `ArduinoJson` v7.x), dan tabel aturan Fuzzy di [`ESP/PANDUAN_ARDUINO_DAN_FUZZY.md`](file:///c:/ITIOT/ESP/PANDUAN_ARDUINO_DAN_FUZZY.md).
+Kode sumber utama berada di [`ESP/sketch_nov6a/sketch_nov6a.ino`](file:///c:/ITIOT/ESP/sketch_nov6a/sketch_nov6a.ino), disertai panduan setup board, 7 library eksternal wajib (`ArduinoJson` v7.x, `Adafruit SHT31 Library`, `Adafruit GFX Library`, `Adafruit SSD1306`, `Adafruit BusIO`, `RTClib`, `ESP32Servo`), dan tabel aturan Fuzzy di [`ESP/PANDUAN_ARDUINO_DAN_FUZZY.md`](file:///c:/ITIOT/ESP/PANDUAN_ARDUINO_DAN_FUZZY.md).
 
 ### A. Mapping Pin ESP32 DOIT (30-Pin) & Jalur Daya
 
@@ -99,14 +99,14 @@ Sesuai panduan wiring final:
 
 | Konstanta di Kode | Pin / Alamat | Arah / Mode | Komponen Terhubung & Catatan |
 | :--- | :--- | :--- | :--- |
+| `PIN_I2C2_SDA` | `GPIO 16` (`RX2`) | I2C-2 Data | Jalur SDA2 khusus Layar OLED-2 (`I2C_Dua`). |
+| `PIN_I2C2_SCL` | `GPIO 17` (`TX2`) | I2C-2 Clock | Jalur SCL2 khusus Layar OLED-2 (`I2C_Dua`). |
 | `PIN_SERVO_MG90S` | `GPIO 18` | PWM Output | Kabel oranye (Signal) Motor Servo MG90S (`VENT_ANGLE_MIN=0` s.d. `VENT_ANGLE_MAX=90`). |
 | `PIN_BUZZER_SFM27` | `GPIO 19` | Digital Output | Kabel merah (+) Buzzer Aktif SFM-27; kabel hitam (-) ke GND Baseplate. |
 | `PIN_I2C_SDA` | `GPIO 21` | I2C-1 Data | Dicabang di Baut 5 TB-1512 ke SHT30, OLED-1, dan RTC. |
 | `PIN_I2C_SCL` | `GPIO 22` | I2C-1 Clock | Dicabang di Baut 6 TB-1512 ke SHT30, OLED-1, dan RTC. |
 | `PIN_DIMMER_DIM` | `GPIO 25` | Digital/Pulse Out | Pin `PWM / DIM` RobotDyn AC Dimmer (pemicu intensitas bohlam 60W). |
-| `PIN_BTN_START` | `GPIO 26` | `INPUT_PULLUP` | Kaki Pin 1 Push Button Start (1 unit); Pin 2 ke GND Baseplate. |
-| `PIN_I2C2_SDA` | `GPIO 32` | I2C-2 Data | Jalur SDA khusus Layar OLED-2 (`Wire1`, Cara 1 tanpa solder). |
-| `PIN_I2C2_SCL` | `GPIO 33` | I2C-2 Clock | Jalur SCL khusus Layar OLED-2 (`Wire1`, Cara 1 tanpa solder). |
+| `PIN_BTN_START` | `GPIO 26` (& `GPIO 4`) | `INPUT_PULLUP` | Kaki Pin 1 Push Button Start (mendukung `GPIO 26` maupun `GPIO 4` simulasi); Pin 2 ke GND. |
 | `PIN_DIMMER_ZC` | `GPIO 34` | Input Interrupt | Pin `Z-C` (*Zero-Cross Detector*) RobotDyn AC Dimmer. |
 | `I2C_ADDR_SHT30` | `0x44` | Alamat I2C | Sensor suhu & kelembapan SHT30-D / SHT31-D. |
 | `I2C_ADDR_OLED` | `0x3C` | Alamat I2C | Layar OLED 0.96" SSD1306 (`OLED_WIDTH=128`, `OLED_HEIGHT=64`). |
