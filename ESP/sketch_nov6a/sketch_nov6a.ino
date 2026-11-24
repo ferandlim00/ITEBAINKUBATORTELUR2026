@@ -79,9 +79,11 @@ const char* DEVICE_ID             = "inkubator-01";
 const char* DEFAULT_WIFI_SSID     = "Hoho";
 const char* DEFAULT_WIFI_PASS     = "0987654321";
 
-// URL Backend Utama (Custom Domain HTTPS) & Fallback Otomatis (Tailscale VPS "nandoz": 100.83.29.119)
-const char* BACKEND_TELEMETRY_URL = "https://itebaincubatortelur.cc.cd/api/device/telemetry";
-const char* BACKEND_FALLBACK_URL  = "http://100.83.29.119:3000/api/device/telemetry";
+// URL Backend VPS Tailscale Aktif ("kelompok-1-incubator": 100.102.108.69),
+// Jembatan Wi-Fi Laptop (192.168.100.4 -> diteruskan ke 100.102.108.69:3000), & Custom Domain
+const char* BACKEND_TELEMETRY_URL = "http://100.102.108.69:3000/api/device/telemetry";
+const char* BACKEND_FALLBACK_URL  = "http://192.168.100.4:3000/api/device/telemetry";
+const char* BACKEND_DOMAIN_URL    = "https://itebaincubatortelur.cc.cd/api/device/telemetry";
 const char* DEVICE_API_KEY        = "secret-device-token-esp32";
 
 const char* NTP_SERVER_1          = "pool.ntp.org";
@@ -894,7 +896,7 @@ void tampilOLED2(Adafruit_SSD1306& disp) {
     disp.print(" SIAGA  ");
   } else if (state.incubationStatus == "finished") {
     disp.print("SELESAI ");
-  } else if (state.stage == "lockdown" || state.currentDay >= 18) {
+  } else if (state.stage == "lockdown" || state.currentDay >= INCUBATION_LOCKDOWN_START) {
     disp.print("LOCKDOWN");
   } else {
     disp.print(" SETTER ");
@@ -951,13 +953,10 @@ void updateOledDisplay() {
 // 13. SIKLUS INKUBASI 21 HARI & PEMBACAAN SENSOR SHT30 (0x44)
 // ============================================================================
 void updateIncubationCycle() {
-  if (state.motorRunning) {
-    if (millis() - state.motorTurnStartMs >= (unsigned long)state.motorDurationSeconds * 1000UL) {
-      stopTurningCycle(true);
-    }
-  }
-
   if (state.incubationStatus != "running") {
+    if (state.motorRunning) {
+      stopTurningCycle(false);
+    }
     if (state.incubationStatus == "idle") {
       state.currentDay       = 0;
       state.stage            = "";
@@ -995,6 +994,10 @@ void updateIncubationCycle() {
     state.turningStatus = "lockdown";
   } else {
     state.stage = "turning";
+    if (state.motorRunning &&
+        (millis() - state.motorTurnStartMs >= (unsigned long)state.motorDurationSeconds * 1000UL)) {
+      stopTurningCycle(true);
+    }
     if (!state.motorRunning) {
       state.turningStatus = "idle";
       if (state.nextTurningEpoch <= 0) {
@@ -1207,8 +1210,10 @@ void processIncomingCommand(JsonVariantConst cmdObj) {
   else if (target == "turning") {
     String action = cmdObj["action"] | "";
     if (action == "turn_now") {
+      updateIncubationCycle();
       bool canTurn = (state.incubationStatus == "running") &&
                      (state.stage == "turning") &&
+                     (state.currentDay < INCUBATION_LOCKDOWN_START) &&
                      state.encoderOk &&
                      !state.motorRunning;
       if (!canTurn) {
@@ -1299,14 +1304,15 @@ void sendTelemetryAndPollBackend() {
 
   JsonObject inc = doc["incubation"].to<JsonObject>();
   inc["status"]     = state.incubationStatus;
-  inc["total_days"] = INCUBATION_TOTAL_DAYS;
   if (state.incubationStatus == "idle") {
     inc["current_day"] = nullptr;
+    inc["total_days"]  = nullptr;
     inc["started_at"]  = nullptr;
     inc["finish_at"]   = nullptr;
     inc["stage"]       = nullptr;
   } else {
     inc["current_day"] = state.currentDay;
+    inc["total_days"]  = INCUBATION_TOTAL_DAYS;
     inc["started_at"]  = formatIso8601Utc(state.startedAtEpoch);
     inc["finish_at"]   = formatIso8601Utc(state.finishAtEpoch);
     inc["stage"]       = state.stage;
@@ -1420,11 +1426,26 @@ void sendTelemetryAndPollBackend() {
     return code;
   };
 
+  const char* candidateUrls[3] = {
+    BACKEND_TELEMETRY_URL,
+    BACKEND_FALLBACK_URL,
+    BACKEND_DOMAIN_URL
+  };
+  static int lastWorkingUrlIdx = 0;
+
   String responseBody;
-  int httpCode = postToBackend(String(BACKEND_TELEMETRY_URL), responseBody);
-  if ((httpCode < 200 || httpCode >= 300) && strlen(BACKEND_FALLBACK_URL) > 0) {
-    Serial.printf("[HTTP] URL utama gagal (HTTP %d), mencoba fallback Tailscale (%s)...\n", httpCode, BACKEND_FALLBACK_URL);
-    httpCode = postToBackend(String(BACKEND_FALLBACK_URL), responseBody);
+  int httpCode = -1;
+  for (int attempt = 0; attempt < 3; attempt++) {
+    int idx = (lastWorkingUrlIdx + attempt) % 3;
+    if (candidateUrls[idx] == nullptr || strlen(candidateUrls[idx]) == 0) continue;
+
+    httpCode = postToBackend(String(candidateUrls[idx]), responseBody);
+    if (httpCode >= 200 && httpCode < 300) {
+      lastWorkingUrlIdx = idx;
+      break;
+    }
+    Serial.printf("[HTTP] URL [%d] %s gagal (HTTP %d), mencoba URL cadangan berikutnya...\n",
+                  idx, candidateUrls[idx], httpCode);
   }
 
   state.backendChecked = true;
