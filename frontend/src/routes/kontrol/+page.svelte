@@ -98,22 +98,28 @@
       </p>
 
       <fieldset class="mt-3" disabled={terkunci}>
-        <legend class="text-sm font-medium">Mode</legend>
-        <div class="mt-1 flex gap-4">
-          <label class="flex items-center gap-2"><input type="radio" value="auto" bind:group={lampuMode} /> Otomatis</label>
-          <label class="flex items-center gap-2"><input type="radio" value="manual" bind:group={lampuMode} /> Manual</label>
+        <legend class="text-sm font-medium text-ink2">Mode</legend>
+        <div class="pilih-segmen mt-1.5">
+          <label class="pilih-segmen-opsi" data-terpilih={lampuMode === 'auto'}>
+            <input type="radio" value="auto" bind:group={lampuMode} class="sr-only" />
+            <Ikon nama="otomatis" ukuran="1.1rem" /> Otomatis
+          </label>
+          <label class="pilih-segmen-opsi" data-terpilih={lampuMode === 'manual'}>
+            <input type="radio" value="manual" bind:group={lampuMode} class="sr-only" />
+            <Ikon nama="kontrol" ukuran="1.1rem" /> Manual
+          </label>
         </div>
 
         {#if lampuMode === 'manual'}
-          <label class="mt-3 block text-sm font-medium" for="lampu-nilai">Intensitas: {lampuNilai}% (maks. {lampuMaks}%)</label>
-          <input id="lampu-nilai" type="range" min="0" max={lampuMaks} bind:value={lampuNilai} class="w-full" />
-          <p class="mt-1 text-sm text-warn"><Ikon nama="bahaya" /> Mode manual tidak menjaga suhu otomatis. Pantau suhu di Dashboard.</p>
+          <label class="mt-3.5 block text-sm font-medium" for="lampu-nilai">Intensitas: <strong class="text-ember2">{lampuNilai}%</strong> (maks. {lampuMaks}%)</label>
+          <input id="lampu-nilai" type="range" min="0" max={lampuMaks} bind:value={lampuNilai} class="mt-1 w-full" />
+          <p class="mt-1.5 text-sm text-warn"><Ikon nama="bahaya" /> Mode manual tidak menjaga suhu otomatis. Pantau suhu di Dashboard.</p>
         {:else}
           <p class="mt-3 text-sm text-mute">Intensitas diatur otomatis oleh logika fuzzy di perangkat.</p>
         {/if}
 
         <button type="button" onclick={terapkanLampu} disabled={terkunci || sibuk.lamp}
-          class="mt-4 tombol">
+          class="mt-4 tombol w-full sm:w-auto">
           {sibuk.lamp ? 'Mengirim…' : 'Terapkan'}
         </button>
       </fieldset>
@@ -127,25 +133,31 @@
     <section class="kartu p-4">
       <h2 class="text-lg font-semibold">Ventilasi</h2>
       <p class="mt-1 text-sm text-mute">
-        Saat ini: {data.ventilation.mode === 'auto' ? (data.ventilation.fuzzy_active ? 'otomatis (fuzzy)' : 'otomatis') : 'manual'}, bukaan {data.ventilation.angle}°
+        Saat ini: {data.ventilation.mode === 'auto' ? (data.ventilation.fuzzy_active ? 'otomatis (fuzzy)' : 'otomatis (4 mode)') : 'manual'}, bukaan {data.ventilation.angle}°
       </p>
 
       <fieldset class="mt-3" disabled={terkunci}>
-        <legend class="text-sm font-medium">Mode</legend>
-        <div class="mt-1 flex gap-4">
-          <label class="flex items-center gap-2"><input type="radio" value="auto" bind:group={ventMode} /> Otomatis</label>
-          <label class="flex items-center gap-2"><input type="radio" value="manual" bind:group={ventMode} /> Manual</label>
+        <legend class="text-sm font-medium text-ink2">Mode</legend>
+        <div class="pilih-segmen mt-1.5">
+          <label class="pilih-segmen-opsi" data-terpilih={ventMode === 'auto'}>
+            <input type="radio" value="auto" bind:group={ventMode} class="sr-only" />
+            <Ikon nama="otomatis" ukuran="1.1rem" /> Otomatis
+          </label>
+          <label class="pilih-segmen-opsi" data-terpilih={ventMode === 'manual'}>
+            <input type="radio" value="manual" bind:group={ventMode} class="sr-only" />
+            <Ikon nama="kontrol" ukuran="1.1rem" /> Manual
+          </label>
         </div>
 
         {#if ventMode === 'manual'}
-          <label class="mt-3 block text-sm font-medium" for="vent-nilai">Bukaan: {ventNilai}° (0° tutup, {ventMaks}° buka penuh)</label>
-          <input id="vent-nilai" type="range" min="0" max={ventMaks} bind:value={ventNilai} class="w-full" />
+          <label class="mt-3.5 block text-sm font-medium" for="vent-nilai">Bukaan: <strong class="text-ember2">{ventNilai}°</strong> (0° tutup, {ventMaks}° buka penuh)</label>
+          <input id="vent-nilai" type="range" min="0" max={ventMaks} bind:value={ventNilai} class="mt-1 w-full" />
         {:else}
-          <p class="mt-3 text-sm text-mute">Bukaan diatur otomatis oleh logika fuzzy di perangkat.</p>
+          <p class="mt-3 text-sm text-mute">Bukaan diatur otomatis dalam 4 mode bertahap: Tutup (0°), Oksigen Minimal (15°), Sirkulasi / Lockdown (40°), dan Buang Panas (90°).</p>
         {/if}
 
         <button type="button" onclick={terapkanVentilasi} disabled={terkunci || sibuk.ventilation}
-          class="mt-4 tombol">
+          class="mt-4 tombol w-full sm:w-auto">
           {sibuk.ventilation ? 'Mengirim…' : 'Terapkan'}
         </button>
       </fieldset>

@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"math"
 	"strconv"
 	"strings"
@@ -176,6 +177,8 @@ func (h *TelemetryHandler) IngestDeviceTelemetry(c fiber.Ctx) error {
 		deviceID = h.cfg.DeviceID
 	}
 
+	normalizeIncubationStage(&p)
+
 	now := time.Now().UTC()
 	deviceUpdated := now
 	if p.UpdatedAt != "" {
@@ -224,6 +227,12 @@ func (h *TelemetryHandler) IngestDeviceTelemetry(c fiber.Ctx) error {
 			)
 		}
 	}
+
+	var prevIncStatus, prevIncStage sql.NullString
+	hasPrevState := h.db.QueryRow(
+		"SELECT incubation_status, incubation_stage FROM device_state WHERE device_id = ? LIMIT 1",
+		deviceID,
+	).Scan(&prevIncStatus, &prevIncStage) == nil
 
 	_, err := h.db.Exec(
 		`INSERT INTO device_state (
@@ -300,7 +309,40 @@ func (h *TelemetryHandler) IngestDeviceTelemetry(c fiber.Ctx) error {
 		deviceID, p.Temperature, p.Humidity, p.Lamp.Intensity, p.Ventilation.Angle, now,
 	)
 
-	h.reconcileAlerts(deviceID, p)
+	if p.Wifi.Connected {
+		if ssid := strings.TrimSpace(p.Wifi.SSID); ssid != "" {
+			_, _ = h.db.Exec(
+				`UPDATE device_settings
+				 SET wifi_ssid = ?
+				 WHERE device_id = ? AND wifi_sync_pending = 0 AND wifi_ssid <> ?`,
+				ssid, deviceID, ssid,
+			)
+		}
+	}
+
+	notifCfg := loadNotificationSettings(h.db, h.cfg, h.tg)
+	h.reconcileAlerts(deviceID, p, notifCfg)
+
+	if hasPrevState && notifCfg.General && h.tg != nil {
+		currStatus := defaultIfEmpty(p.Incubation.Status, "idle")
+		currStage := ""
+		if p.Incubation.Stage != nil {
+			currStage = strings.TrimSpace(*p.Incubation.Stage)
+		}
+		if prevIncStatus.String != "" && prevIncStatus.String != "running" && currStatus == "running" {
+			h.tg.DispatchAlert("general:"+deviceID+":cycle_start", "general", "info",
+				fmt.Sprintf("Siklus inkubasi 21 hari resmi dimulai (Hari ke-1, target suhu %.1f°C). Telur akan dibalik otomatis sesuai jadwal.", p.TargetTemperature),
+				1*time.Minute, notifCfg.TelegramEnabled)
+		} else if currStatus == "running" && prevIncStage.String != "lockdown" && currStage == "lockdown" {
+			h.tg.DispatchAlert("general:"+deviceID+":cycle_lockdown", "general", "info",
+				"Siklus memasuki Fase Lockdown (Hari 19–21). Pembalikan telur otomatis dihentikan, bukaan oksigen ventilasi dinaikkan ke 40°, dan jaga kelembapan di rentang 60%–78%.",
+				1*time.Minute, notifCfg.TelegramEnabled)
+		} else if prevIncStatus.String == "running" && currStatus == "finished" {
+			h.tg.DispatchAlert("general:"+deviceID+":cycle_finished", "general", "info",
+				"Siklus inkubasi 21 hari telah selesai! Telur memasuki masa menetas. Pantau kondisi penetasan sebelum memindahkan anakan.",
+				1*time.Minute, notifCfg.TelegramEnabled)
+		}
+	}
 
 	// Fetch oldest pending dispatched command (created within last 60s)
 	_, _ = h.db.Exec(
@@ -335,59 +377,122 @@ func (h *TelemetryHandler) IngestDeviceTelemetry(c fiber.Ctx) error {
 	})
 }
 
-func (h *TelemetryHandler) reconcileAlerts(deviceID string, p models.DeviceTelemetryPayload) {
+const (
+	tempHighAlertC     = 38.5
+	tempHighClearC     = 38.2
+	tempLowAlertC      = 36.5
+	tempLowClearC      = 36.8
+	humSetterMinAlert  = 45.0
+	humSetterMaxAlert  = 70.0
+	humLockdownMin     = 60.0
+	humLockdownMax     = 78.0
+	humClearHystPct    = 2.0
+	alertTgCooldown    = 5 * time.Minute
+	recoveryTgCooldown = 3 * time.Minute
+)
+
+func humidityBoundsForPayload(p models.DeviceTelemetryPayload) (minAlert, maxAlert, minClear, maxClear float64, stageLabel string) {
+	if p.Incubation.Stage != nil && strings.TrimSpace(*p.Incubation.Stage) == "lockdown" {
+		return humLockdownMin, humLockdownMax, humLockdownMin + humClearHystPct, humLockdownMax - humClearHystPct, "Fase Lockdown"
+	}
+	return humSetterMinAlert, humSetterMaxAlert, humSetterMinAlert + humClearHystPct, humSetterMaxAlert - humClearHystPct, "Fase Setter"
+}
+
+func offlineAlertSeconds(staleSeconds int) int {
+	if staleSeconds <= 0 {
+		staleSeconds = 15
+	}
+	if staleSeconds*3 > 45 {
+		return staleSeconds * 3
+	}
+	return 45
+}
+
+func (h *TelemetryHandler) reconcileAlerts(deviceID string, p models.DeviceTelemetryPayload, notifCfg models.NotificationSettings) {
 	// Resolve stale communication offline alert because device just checked in
-	_, _ = h.db.Exec(
+	resStale, staleErr := h.db.Exec(
 		`UPDATE alerts SET status = 'resolved', resolved_at = UTC_TIMESTAMP()
 		 WHERE device_id = ? AND type = 'communication' AND status = 'active'
-		   AND message LIKE 'Perangkat tidak mengirim data%'`,
+		   AND (message LIKE 'Perangkat tidak mengirim data%' OR message LIKE 'Perangkat ESP32 tidak mengirim data%')`,
 		deviceID,
 	)
-
-	// Evaluate temperature thresholds (36.5 - 38.5 °C)
-	if p.Temperature > 38.5 {
-		h.ensureActiveAlert(deviceID, "over_temperature", "high",
-			"Suhu "+strconv.FormatFloat(p.Temperature, 'f', 1, 64)+"°C melewati batas atas (38.5°C)")
-	} else {
-		h.resolveAlertType(deviceID, "over_temperature")
+	if staleErr == nil {
+		if affected, _ := resStale.RowsAffected(); affected > 0 && notifCfg.General && h.tg != nil {
+			h.tg.DispatchAlert("recovery:"+deviceID+":communication", "general", "info",
+				fmt.Sprintf("Koneksi ESP32 kembali online dan mengirim data normal (Suhu %.1f°C, Kelembapan %.0f%%).", p.Temperature, p.Humidity),
+				recoveryTgCooldown, notifCfg.TelegramEnabled)
+		}
 	}
 
-	if p.Temperature < 36.5 {
-		h.ensureActiveAlert(deviceID, "low_temperature", "low",
-			"Suhu "+strconv.FormatFloat(p.Temperature, 'f', 1, 64)+"°C di bawah batas bawah (36.5°C)")
+	hasSensorErr := false
+	sensorMsg := "Sensor SHT30/SHT31 gagal membaca data 3 kali berturut-turut. Periksa koneksi kabel I2C (GPIO 21/22) dan daya modul sensor."
+	for _, a := range p.ActiveAlerts {
+		if a.Type == "sensor_error" {
+			hasSensorErr = true
+			if strings.TrimSpace(a.Message) != "" {
+				sensorMsg = a.Message
+			}
+		} else if a.Type == "communication" {
+			h.ensureActiveAlert(deviceID, "communication", defaultIfEmpty(a.Severity, "medium"), a.Message, notifCfg)
+		}
+	}
+
+	if hasSensorErr {
+		h.ensureActiveAlert(deviceID, "sensor_error", "medium", sensorMsg, notifCfg)
 	} else {
-		h.resolveAlertType(deviceID, "low_temperature")
+		h.resolveAlertTypeAndNotify(deviceID, "sensor_error",
+			"Pembacaan sensor suhu & kelembapan SHT30/SHT31 kembali normal.", notifCfg)
+	}
+
+	// Evaluate temperature thresholds with hysteresis (36.5 - 38.5 °C)
+	if p.Temperature > tempHighAlertC {
+		h.ensureActiveAlert(deviceID, "over_temperature", "high",
+			fmt.Sprintf("Suhu terpantau %.1f°C (melewati batas aman atas 38.5°C). Periksa dimmer lampu pemanas dan pastikan ventilasi 90° terbuka lancar.", p.Temperature), notifCfg)
+	} else if p.Temperature <= tempHighClearC {
+		h.resolveAlertTypeAndNotify(deviceID, "over_temperature",
+			fmt.Sprintf("Suhu kembali turun ke rentang aman (%.1f°C).", p.Temperature), notifCfg)
+	}
+
+	if p.Temperature < tempLowAlertC {
+		h.ensureActiveAlert(deviceID, "low_temperature", "low",
+			fmt.Sprintf("Suhu terpantau %.1f°C (di bawah batas aman bawah 36.5°C). Periksa lampu bohlam 60W, dimmer AC, dan pastikan boks tertutup rapat.", p.Temperature), notifCfg)
+	} else if p.Temperature >= tempLowClearC {
+		h.resolveAlertTypeAndNotify(deviceID, "low_temperature",
+			fmt.Sprintf("Suhu kembali naik ke rentang aman (%.1f°C).", p.Temperature), notifCfg)
+	}
+
+	// Evaluate stage-aware humidity bounds with hysteresis (Setter 45-70%, Lockdown 60-78%)
+	humMinAlert, humMaxAlert, humMinClear, humMaxClear, humStage := humidityBoundsForPayload(p)
+	if !hasSensorErr && p.Humidity < humMinAlert {
+		advice := "Tambahkan air pada wadah penguapan di dalam boks."
+		if humStage == "Fase Lockdown" {
+			advice = "Tambahkan air hangat atau perbesar luas wadah air dan jaga tutup boks tetap rapat."
+		}
+		h.ensureActiveAlert(deviceID, "humidity_warning", "medium",
+			fmt.Sprintf("Kelembapan terpantau %.0f%% (di bawah batas minimal %s %.0f%%). %s", p.Humidity, humStage, humMinAlert, advice), notifCfg)
+	} else if !hasSensorErr && p.Humidity > humMaxAlert {
+		h.ensureActiveAlert(deviceID, "humidity_warning", "medium",
+			fmt.Sprintf("Kelembapan terpantau %.0f%% (melewati batas maksimal %s %.0f%%). Kurangi luas air atau biarkan ventilasi mengalirkan uap berlebih.", p.Humidity, humStage, humMaxAlert), notifCfg)
+	} else if !hasSensorErr && p.Humidity >= humMinClear && p.Humidity <= humMaxClear {
+		h.resolveAlertTypeAndNotify(deviceID, "humidity_warning",
+			fmt.Sprintf("Kelembapan kembali masuk ke rentang aman %s (%.0f%%).", humStage, p.Humidity), notifCfg)
 	}
 
 	if !p.Motor.EncoderOK || p.Turning.Status == "fault" {
 		h.ensureActiveAlert(deviceID, "motor_fault", "high",
-			"Motor pembalik menyala tetapi encoder tidak mendeteksi pulsa")
+			"Motor pembalik telur menyala tetapi sensor posisi tidak mendeteksi gerakan.", notifCfg)
 	} else {
-		h.resolveAlertType(deviceID, "motor_fault")
-	}
-
-	hasSensorErr := false
-	for _, a := range p.ActiveAlerts {
-		if a.Type == "sensor_error" {
-			hasSensorErr = true
-			h.ensureActiveAlert(deviceID, "sensor_error", "medium", defaultIfEmpty(a.Message, "Pembacaan sensor SHT30/SHT31 gagal 3 kali berturut-turut"))
-		} else if a.Type == "communication" {
-			h.ensureActiveAlert(deviceID, "communication", "medium", a.Message)
-		}
-	}
-	if !hasSensorErr {
-		h.resolveAlertType(deviceID, "sensor_error")
+		h.resolveAlertTypeAndNotify(deviceID, "motor_fault", "Sistem pembalik telur kembali berjalan normal.", notifCfg)
 	}
 }
 
-func (h *TelemetryHandler) ensureActiveAlert(deviceID, alertType, severity, message string) {
+func (h *TelemetryHandler) ensureActiveAlert(deviceID, alertType, severity, message string, notifCfg models.NotificationSettings) {
 	var existingID int64
 	err := h.db.QueryRow(
 		"SELECT id FROM alerts WHERE device_id = ? AND type = ? AND status = 'active' LIMIT 1",
 		deviceID, alertType,
 	).Scan(&existingID)
 	if err == nil {
-		// Update message to latest reading while keeping same active alert
 		_, _ = h.db.Exec("UPDATE alerts SET message = ? WHERE id = ?", message, existingID)
 		return
 	}
@@ -397,17 +502,22 @@ func (h *TelemetryHandler) ensureActiveAlert(deviceID, alertType, severity, mess
 		 VALUES (?, ?, ?, ?, 'active', UTC_TIMESTAMP())`,
 		deviceID, alertType, severity, message,
 	)
-	if err == nil && severity == "high" && h.tg != nil {
-		h.tg.SendHighAlert(alertType, message)
+	if err == nil && notifCfg.IsTypeEnabled(alertType) && h.tg != nil {
+		h.tg.DispatchAlert("alert:"+deviceID+":"+alertType, alertType, severity, message, alertTgCooldown, notifCfg.TelegramEnabled)
 	}
 }
 
-func (h *TelemetryHandler) resolveAlertType(deviceID, alertType string) {
-	_, _ = h.db.Exec(
+func (h *TelemetryHandler) resolveAlertTypeAndNotify(deviceID, alertType, recoveryMsg string, notifCfg models.NotificationSettings) {
+	res, err := h.db.Exec(
 		`UPDATE alerts SET status = 'resolved', resolved_at = UTC_TIMESTAMP()
 		 WHERE device_id = ? AND type = ? AND status = 'active'`,
 		deviceID, alertType,
 	)
+	if err == nil && recoveryMsg != "" && notifCfg.General && h.tg != nil {
+		if affected, _ := res.RowsAffected(); affected > 0 {
+			h.tg.DispatchAlert("recovery:"+deviceID+":"+alertType, "general", "info", recoveryMsg, recoveryTgCooldown, notifCfg.TelegramEnabled)
+		}
+	}
 }
 
 func (h *TelemetryHandler) loadSettingsSync(deviceID string) *models.DeviceSettingsSync {
@@ -533,7 +643,7 @@ func GetDeviceSnapshot(db *sql.DB, cfg *config.Config) (models.TelemetryResponse
 		resp.Turning.LastTurnedAt = &s
 	}
 	if nextTurning.Valid && resp.Incubation.Status == "running" &&
-		resp.Incubation.Stage != nil && *resp.Incubation.Stage == "turning" {
+		!isIncubationLockdown(resp.Incubation, resp.Turning) {
 		s := nextTurning.Time.UTC().Format(time.RFC3339)
 		resp.Turning.NextTurningAt = &s
 	}
@@ -559,30 +669,38 @@ func GetDeviceSnapshot(db *sql.DB, cfg *config.Config) (models.TelemetryResponse
 	return resp, isStale, nil
 }
 
-// CheckStaleDevice inspects device_state periodically and opens a communication alert when offline > stale_seconds.
-func CheckStaleDevice(db *sql.DB, cfg *config.Config) {
+// CheckStaleDevice inspects device_state periodically and opens a communication alert after sustained offline duration.
+func CheckStaleDevice(db *sql.DB, cfg *config.Config, tg *services.TelegramNotifier) {
 	var lastTelemetry sql.NullTime
 	err := db.QueryRow("SELECT last_telemetry_at FROM device_state WHERE device_id = ? LIMIT 1", cfg.DeviceID).Scan(&lastTelemetry)
 	if err != nil || !lastTelemetry.Valid {
 		return
 	}
 
+	alertSec := offlineAlertSeconds(cfg.StaleSeconds)
 	elapsed := time.Since(lastTelemetry.Time.UTC())
-	if elapsed > time.Duration(cfg.StaleSeconds)*time.Second {
+	if elapsed > time.Duration(alertSec)*time.Second {
 		var existing int64
 		err := db.QueryRow(
 			`SELECT id FROM alerts
 			 WHERE device_id = ? AND type = 'communication' AND status = 'active'
-			   AND message LIKE 'Perangkat tidak mengirim data%'
+			   AND (message LIKE 'Perangkat tidak mengirim data%' OR message LIKE 'Perangkat ESP32 tidak mengirim data%')
 			 LIMIT 1`,
 			cfg.DeviceID,
 		).Scan(&existing)
 		if err != nil {
-			_, _ = db.Exec(
+			msg := fmt.Sprintf("Perangkat ESP32 tidak mengirim data ke server selama lebih dari %d detik. Periksa catu daya inkubator dan koneksi Wi-Fi.", alertSec)
+			_, insErr := db.Exec(
 				`INSERT INTO alerts (device_id, type, severity, message, status, created_at)
-				 VALUES (?, 'communication', 'medium', 'Perangkat tidak mengirim data lebih dari 15 detik.', 'active', UTC_TIMESTAMP())`,
-				cfg.DeviceID,
+				 VALUES (?, 'communication', 'high', ?, 'active', UTC_TIMESTAMP())`,
+				cfg.DeviceID, msg,
 			)
+			if insErr == nil && tg != nil {
+				notifCfg := loadNotificationSettings(db, cfg, tg)
+				if notifCfg.Communication {
+					tg.DispatchAlert("alert:"+cfg.DeviceID+":communication", "communication", "high", msg, alertTgCooldown, notifCfg.TelegramEnabled)
+				}
+			}
 		}
 	}
 }
@@ -610,4 +728,41 @@ func defaultIfEmpty(s, fallback string) string {
 		return fallback
 	}
 	return s
+}
+
+func normalizeIncubationStage(p *models.DeviceTelemetryPayload) {
+	status := defaultIfEmpty(p.Incubation.Status, "idle")
+	p.Incubation.Status = status
+
+	if status == "idle" {
+		p.Incubation.CurrentDay = nil
+		p.Incubation.TotalDays = nil
+		p.Incubation.StartedAt = nil
+		p.Incubation.FinishAt = nil
+		p.Incubation.Stage = nil
+		p.Turning.NextTurningAt = nil
+		if p.Turning.Status == "lockdown" {
+			p.Turning.Status = "idle"
+		}
+		return
+	}
+
+	isLockdown := status == "finished" ||
+		(p.Incubation.CurrentDay != nil && *p.Incubation.CurrentDay >= 19) ||
+		(p.Incubation.Stage != nil && *p.Incubation.Stage == "lockdown")
+
+	if isLockdown {
+		stage := "lockdown"
+		p.Incubation.Stage = &stage
+		p.Turning.NextTurningAt = nil
+		if p.Turning.Status != "fault" {
+			p.Turning.Status = "lockdown"
+		}
+		return
+	}
+
+	if p.Incubation.Stage == nil || strings.TrimSpace(*p.Incubation.Stage) == "" {
+		stage := "turning"
+		p.Incubation.Stage = &stage
+	}
 }

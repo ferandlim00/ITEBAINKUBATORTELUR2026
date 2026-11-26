@@ -32,11 +32,11 @@
     <h3 class="text-base font-semibold leading-tight text-ink">{title}</h3>
   </div>
 
-  <div class="mt-3 rounded-xl bg-white/5 px-3 py-3">
+  <div class="mt-2.5 rounded-xl bg-white/5 px-3 py-2.5 sm:mt-3 sm:py-3">
     {#if status}
-      <p class="flex items-center gap-2 text-lg font-bold leading-tight {warnaTone[status.tone] ?? 'text-ink'}"><Ikon nama={status.icon} ukuran="1.4rem" />{status.label}</p>
+      <p class="flex items-center gap-1.5 text-base font-bold leading-tight sm:gap-2 sm:text-lg {warnaTone[status.tone] ?? 'text-ink'}"><Ikon nama={status.icon} ukuran="1.3rem" />{status.label}</p>
     {:else}
-      <p class="text-3xl font-bold leading-none tracking-tight text-ink">{value}{#if unit}<span class="ml-1 text-base font-medium text-mute">{unit}</span>{/if}</p>
+      <p class="text-2xl font-bold leading-none tracking-tight text-ink sm:text-3xl">{value}{#if unit}<span class="ml-1 text-sm font-medium text-mute sm:text-base">{unit}</span>{/if}</p>
     {/if}
     {#if persen != null}
       <div class="mt-3 h-2.5 overflow-hidden rounded-full bg-white/10" role="progressbar" aria-label={title}

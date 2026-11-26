@@ -48,6 +48,10 @@ services:
       OPERATOR_PASSWORD: ${OPERATOR_PASSWORD:-operator12345}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      FIREBASE_CREDENTIALS_FILE: /app/firebase-service-account.json
+      FCM_TOPIC: ${FCM_TOPIC:-incubator_alerts}
+    volumes:
+      - ./firebase-service-account.json:/app/firebase-service-account.json:ro
     ports:
       - "${BACKEND_PORT_BIND:-3000:3000}"
     networks:

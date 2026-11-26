@@ -1,7 +1,7 @@
 <script>
   import Ikon from '$lib/components/Ikon.svelte';
   import { sendCommand, getHistory, mockScenario } from '$lib/api.js';
-  import { live, isStale, umurDetik, refresh } from '$lib/live.svelte.js';
+  import { live, isStale, umurDetik, refresh, ambangLembap } from '$lib/live.svelte.js';
   import { ageText, ageSeconds, sinyalText, durasiText } from '$lib/format.js';
   import { statusPutar } from '$lib/turning.js';
   import StatusBadge from '$lib/components/StatusBadge.svelte';
@@ -24,10 +24,11 @@
 
   let data = $derived(live.data);
   let batas = $derived(live.thresholds);
+  let batasLembap = $derived(ambangLembap(data, batas));
   let kedaluwarsa = $derived(isStale());
   let suhuDalamBatas = $derived(!!data && data.temperature >= batas.temp_min && data.temperature <= batas.temp_max);
-  let punyaBatasLembap = $derived(batas.hum_min != null && batas.hum_max != null);
-  let lembapDalamBatas = $derived(!!data && punyaBatasLembap && data.humidity >= batas.hum_min && data.humidity <= batas.hum_max);
+  let punyaBatasLembap = $derived(batasLembap.min != null && batasLembap.max != null);
+  let lembapDalamBatas = $derived(!!data && punyaBatasLembap && data.humidity >= batasLembap.min && data.humidity <= batasLembap.max);
   let wifi = $derived(data?.wifi ?? { connected: false, ssid: '', rssi: null });
   let inc = $derived(data?.incubation ?? { status: 'idle', started_at: null, finish_at: null, stage: null });
   let turning = $derived(data?.turning ?? { status: 'idle', last_turned_at: null, next_turning_at: null });
@@ -70,9 +71,9 @@
     }
   }
 
-  function modeNote(x) {
+  function modeNote(x, autoLabel = 'Otomatis') {
     if (x.mode !== 'auto') return 'Manual';
-    return x.fuzzy_active ? 'Otomatis (Fuzzy)' : 'Otomatis';
+    return x.fuzzy_active ? 'Otomatis (Fuzzy)' : autoLabel;
   }
 </script>
 
@@ -88,45 +89,58 @@
   {#if !live.error}<p class="mt-4 text-mute">Memuat data…</p>{/if}
 {:else}
   <!-- Pertanyaan utama (DES 01): data baru? suhu dan kelembapan dalam batas? peringatan? aktuator? Wi-Fi? -->
-  <div class="kartu mt-4 flex flex-wrap items-center gap-3 p-4">
-    {#if kedaluwarsa}
-      <StatusBadge tone="warn" icon="⏱" label="Data kedaluwarsa" />
-      <StatusBadge tone="mute" icon="?" label="Suhu belum pasti" />
-    {:else}
-      <StatusBadge tone="ok" icon="✓" label="Data terbaru" />
-      {#if suhuDalamBatas}
-        <StatusBadge tone="ok" icon="✓" label="Suhu dalam batas" />
+  <div class="kartu mt-3 p-3.5 sm:mt-4 sm:p-4">
+    <div class="strip-gulir flex flex-nowrap items-center gap-2 overflow-x-auto pb-1 md:flex-wrap md:gap-2.5 md:overflow-visible md:pb-0">
+      {#if kedaluwarsa}
+        <span class="shrink-0"><StatusBadge tone="warn" icon="⏱" label="Data kedaluwarsa" /></span>
+        <span class="shrink-0"><StatusBadge tone="mute" icon="?" label="Suhu belum pasti" /></span>
       {:else}
-        <StatusBadge tone="bad" icon="⚠" label="Suhu di luar batas" />
-      {/if}
-      {#if punyaBatasLembap}
-        {#if lembapDalamBatas}
-          <StatusBadge tone="ok" icon="✓" label="Kelembapan dalam batas" />
-        {:else}
-          <StatusBadge tone="bad" icon="⚠" label="Kelembapan di luar batas" />
+        <span class="shrink-0"><StatusBadge tone="ok" icon="✓" label="Data terbaru" /></span>
+        <span class="shrink-0">
+          {#if suhuDalamBatas}
+            <StatusBadge tone="ok" icon="✓" label="Suhu dalam batas" />
+          {:else}
+            <StatusBadge tone="bad" icon="⚠" label="Suhu di luar batas" />
+          {/if}
+        </span>
+        {#if punyaBatasLembap}
+          <span class="shrink-0">
+            {#if lembapDalamBatas}
+              <StatusBadge tone="ok" icon="✓" label="Kelembapan dalam batas" />
+            {:else}
+              <StatusBadge tone="bad" icon="⚠" label="Kelembapan di luar batas" />
+            {/if}
+          </span>
         {/if}
       {/if}
-    {/if}
 
-    {#if peringatan.length > 0}
-      <StatusBadge tone="bad" icon="⚠" label="{peringatan.length} peringatan aktif" />
-    {:else}
-      <StatusBadge tone="ok" icon="✓" label="Tidak ada peringatan" />
-    {/if}
+      <span class="shrink-0">
+        {#if peringatan.length > 0}
+          <StatusBadge tone="bad" icon="⚠" label="{peringatan.length} peringatan aktif" />
+        {:else}
+          <StatusBadge tone="ok" icon="✓" label="Tidak ada peringatan" />
+        {/if}
+      </span>
 
-    {#if aktuatorBermasalah}
-      <StatusBadge tone="bad" icon="⚠" label="Ada aktuator bermasalah" />
-    {:else}
-      <StatusBadge tone="ok" icon="✓" label="Aktuator sesuai" />
-    {/if}
+      <span class="shrink-0">
+        {#if aktuatorBermasalah}
+          <StatusBadge tone="bad" icon="⚠" label="Ada aktuator bermasalah" />
+        {:else}
+          <StatusBadge tone="ok" icon="✓" label="Aktuator sesuai" />
+        {/if}
+      </span>
 
-    {#if wifi.connected}
-      <StatusBadge tone="ok" icon="✓" label="Wi-Fi terhubung" />
-    {:else}
-      <StatusBadge tone="bad" icon="⚠" label="Wi-Fi terputus" />
-    {/if}
+      <span class="shrink-0">
+        {#if wifi.connected}
+          <StatusBadge tone="ok" icon="✓" label="Wi-Fi terhubung" />
+        {:else}
+          <StatusBadge tone="bad" icon="⚠" label="Wi-Fi terputus" />
+        {/if}
+      </span>
 
-    <span class="ml-auto text-sm text-mute">Pembaruan terakhir: {ageText(umurDetik())}</span>
+      <span class="hidden text-sm text-mute md:ml-auto md:inline">Pembaruan terakhir: {ageText(umurDetik())}</span>
+    </div>
+    <p class="mt-2 border-t border-line/60 pt-2 text-xs text-mute md:hidden">Pembaruan terakhir: {ageText(umurDetik())}</p>
   </div>
 
   {#if peringatan.length > 0}
@@ -161,11 +175,11 @@
     <Gauge title="Suhu" ikon="suhu" value={data.temperature} unit="°C" min={30} max={45} target={data.target_temperature}
       okMin={batas.temp_min} okMax={batas.temp_max} desimal={1} old={kedaluwarsa} />
     <Gauge title="Kelembapan" ikon="lembap" value={data.humidity} unit="%" min={0} max={100} target={data.target_humidity ?? null}
-      okMin={punyaBatasLembap ? batas.hum_min : null} okMax={punyaBatasLembap ? batas.hum_max : null} desimal={0} old={kedaluwarsa} />
+      okMin={punyaBatasLembap ? batasLembap.min : null} okMax={punyaBatasLembap ? batasLembap.max : null} desimal={0} old={kedaluwarsa} />
     <MetricCard title="Lampu" ikon="lampu" value={data.lamp.intensity} unit="%" persen={data.lamp.intensity} skala="panas" old={kedaluwarsa}
       baris={[{ label: 'Mode', nilai: modeNote(data.lamp) }, { label: 'Skala', nilai: '0% mati, 100% terang' }]} />
     <MetricCard title="Ventilasi" ikon="angin" value={data.ventilation.angle} unit="°" persen={(data.ventilation.angle / 90) * 100} skala="angin" old={kedaluwarsa}
-      baris={[{ label: 'Mode', nilai: modeNote(data.ventilation) }, { label: 'Skala', nilai: '0° tutup, 90° buka' }]} />
+      baris={[{ label: 'Mode', nilai: modeNote(data.ventilation, 'Otomatis (4 Mode)') }, { label: 'Skala', nilai: '0° tutup, 90° buka' }]} />
     <MetricCard title="Status putar" ikon="putar" status={{ label: statusPutar[turning.status]?.label ?? '—', icon: statusPutar[turning.status]?.icon ?? 'info', tone: statusPutar[turning.status]?.tone ?? 'mute' }} old={kedaluwarsa}
       baris={[{ label: 'Motor pembalik', nilai: motor.running ? 'Berputar' : 'Berhenti' }, { label: 'Terakhir membalik', nilai: turning.last_turned_at ? ageText(ageSeconds(turning.last_turned_at, live.now)) : '—' }]} />
     <MetricCard title="Wi-Fi" ikon="wifi" status={wifi.connected ? { label: 'Terhubung', icon: 'wifi', tone: 'ok' } : { label: 'Terputus', icon: 'wifi', tone: 'bad' }} old={kedaluwarsa}

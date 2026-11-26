@@ -10,12 +10,13 @@
 //   skor         = 0,7 x dalam batas + 0,3 x 100 x max(0, 1 - RMSE / setengah lebar batas)
 export function hitungStabilitas(nilai, { target, min, max }) {
   const n = nilai.length;
-  if (n < 2 || target == null || min == null || max == null) return null;
+  if (n < 2 || min == null || max == null) return null;
 
+  const ref = target ?? (min + max) / 2;
   const rata = nilai.reduce((a, x) => a + x, 0) / n;
   const simpangan = Math.sqrt(nilai.reduce((a, x) => a + (x - rata) ** 2, 0) / n);
-  const rmse = Math.sqrt(nilai.reduce((a, x) => a + (x - target) ** 2, 0) / n);
-  const devMaks = Math.max(...nilai.map((x) => Math.abs(x - target)));
+  const rmse = Math.sqrt(nilai.reduce((a, x) => a + (x - ref) ** 2, 0) / n);
+  const devMaks = Math.max(...nilai.map((x) => Math.abs(x - ref)));
   const dalam = (nilai.filter((x) => x >= min && x <= max).length / n) * 100;
   const setengah = (max - min) / 2;
   const skorRmse = Math.max(0, 1 - rmse / setengah) * 100;
@@ -33,6 +34,7 @@ export function hitungStabilitas(nilai, { target, min, max }) {
 // titik: [{ t: ISO, v: angka }]. Durasi dihitung dari jarak antar titik data.
 export function cariKejadian(titik, { min, max, target }) {
   if (titik.length < 2 || min == null || max == null) return [];
+  const ref = target ?? (min + max) / 2;
   const jeda = (new Date(titik[titik.length - 1].t) - new Date(titik[0].t)) / (titik.length - 1);
   const daftar = [];
   let aktif = null;
@@ -42,7 +44,7 @@ export function cariKejadian(titik, { min, max, target }) {
       if (!aktif) aktif = { mulai: p.t, akhir: p.t, puncak: p.v, arah: p.v > max ? 'tinggi' : 'rendah' };
       else {
         aktif.akhir = p.t;
-        if (Math.abs(p.v - target) > Math.abs(aktif.puncak - target)) aktif.puncak = p.v;
+        if (Math.abs(p.v - ref) > Math.abs(aktif.puncak - ref)) aktif.puncak = p.v;
       }
     } else if (aktif) {
       daftar.push(aktif);

@@ -28,7 +28,7 @@ export const telemetryNormal = {
     summary: 'Hari ke-18 (Fase Turning). Suhu dan aktuator bekerja normal.'
   },
   lamp: { mode: 'auto', intensity: 62, fuzzy_active: true }, // mode: auto | manual, intensity 0-100 (%)
-  ventilation: { mode: 'auto', angle: 35, fuzzy_active: true }, // angle 0 (tutup) - 90 (buka), derajat
+  ventilation: { mode: 'auto', angle: 15, fuzzy_active: false }, // 4 mode auto: 0°, 15°, 40°, 90° | manual 0-90°
   motor: { running: false, encoder_ok: true },
   // status: idle (menunggu jadwal) | turning | lockdown | fault
   turning: { status: 'idle', last_turned_at: ago(3600 * 2), next_turning_at: ago(-3600) },
@@ -63,8 +63,9 @@ export const alerts = [
   { id: 1, type: 'over_temperature', severity: 'high', message: 'Suhu 39.4°C melewati batas atas', timestamp: ago(120), status: 'active' },
   { id: 2, type: 'motor_fault', severity: 'high', message: 'Motor pembalik menyala tetapi encoder tidak mendeteksi pulsa', timestamp: ago(300), status: 'active' },
   { id: 3, type: 'communication', severity: 'medium', message: 'Perangkat tidak mengirim data selama 5 menit', timestamp: ago(3600), status: 'resolved' },
-  { id: 4, type: 'sensor_error', severity: 'medium', message: 'Pembacaan sensor SHT31 gagal 3 kali berturut-turut', timestamp: ago(3600 * 20), status: 'resolved' },
-  { id: 5, type: 'low_temperature', severity: 'low', message: 'Suhu 36.2°C di bawah batas bawah', timestamp: ago(3600 * 26), status: 'resolved' }
+  { id: 4, type: 'sensor_error', severity: 'medium', message: 'Pembacaan sensor SHT30/SHT31 gagal 3 kali berturut-turut', timestamp: ago(3600 * 20), status: 'resolved' },
+  { id: 5, type: 'low_temperature', severity: 'low', message: 'Suhu 36.2°C di bawah batas bawah', timestamp: ago(3600 * 26), status: 'resolved' },
+  { id: 6, type: 'humidity_warning', severity: 'medium', message: 'Kelembapan 74% melewati batas atas (70%)', timestamp: ago(3600 * 30), status: 'resolved' }
 ];
 
 export const auditLogs = [
@@ -74,13 +75,13 @@ export const auditLogs = [
   { id: 4, user: 'operator1', event: 'command', detail: 'Pembalikan manual', timestamp: ago(3600 * 3) },
   { id: 5, user: 'operator2', event: 'config_change', detail: 'Target suhu diubah ke 37.5°C', timestamp: ago(3600 * 8) },
   { id: 6, user: 'operator1', event: 'login', detail: 'Login berhasil', timestamp: ago(3600 * 9) },
-  { id: 7, user: 'operator1', event: 'command', detail: 'Ventilasi diubah ke mode otomatis', timestamp: ago(3600 * 30) },
+  { id: 7, user: 'operator1', event: 'command', detail: 'Ventilasi diubah ke mode otomatis (4 Mode)', timestamp: ago(3600 * 30) },
   { id: 8, user: 'operator2', event: 'config_change', detail: 'SSID Wi-Fi diubah', timestamp: ago(3600 * 24 * 4) }
 ];
 
 // Tambahan data contoh supaya paginasi Riwayat bisa dicoba
 const contoh = [
-  ['command', 'Lampu diubah ke mode otomatis'], ['login', 'Login berhasil'], ['command', 'Ventilasi diubah ke 45°'],
+  ['command', 'Lampu diubah ke mode otomatis'], ['login', 'Login berhasil'], ['command', 'Ventilasi diubah ke 40°'],
   ['config_change', 'Parameter motor diubah'], ['command', 'Pembalikan manual']
 ];
 for (let i = 0; i < 40; i++) {

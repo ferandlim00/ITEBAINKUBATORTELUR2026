@@ -47,19 +47,19 @@
 
 <h1 class="text-2xl font-semibold">Riwayat aktivitas</h1>
 
-<div class="mt-4 flex flex-wrap gap-4 text-sm">
-  <label>Rentang waktu:
-    <select bind:value={filterJam} onchange={() => (halaman = 1)} class="ml-2 input-kecil">
+<div class="mt-4 grid grid-cols-1 gap-3 text-sm sm:flex sm:flex-wrap sm:items-center sm:gap-4">
+  <label class="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">Rentang waktu:
+    <select bind:value={filterJam} onchange={() => (halaman = 1)} class="input-kecil w-full sm:w-auto">
       {#each rentang as r}<option value={r.jam}>{r.teks}</option>{/each}
     </select>
   </label>
-  <label>Jenis kejadian:
-    <select bind:value={filterJenis} onchange={() => (halaman = 1)} class="ml-2 input-kecil">
+  <label class="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">Jenis kejadian:
+    <select bind:value={filterJenis} onchange={() => (halaman = 1)} class="input-kecil w-full sm:w-auto">
       <option value="semua">Semua</option>
       {#each Object.entries(jenis) as [kode, teks]}<option value={kode}>{teks}</option>{/each}
     </select>
   </label>
-  {#if memuat}<span class="ml-auto text-mute">Memuat…</span>{/if}
+  {#if memuat}<span class="text-mute sm:ml-auto">Memuat…</span>{/if}
 </div>
 
 {#if error}
@@ -71,7 +71,24 @@
     {halaman > 1 ? 'Tidak ada data lagi di halaman ini.' : 'Tidak ada kejadian untuk filter ini. Coba perluas rentang waktu.'}
   </p>
 {:else}
-  <div class="mt-4 overflow-x-auto kartu">
+  <!-- Tampilan kartu ringkas untuk ponsel (mudah dibaca tanpa geser ke samping) -->
+  <ul class="mt-4 space-y-2.5 md:hidden">
+    {#each logs as l (l.id)}
+      <li class="kartu p-3.5 text-sm">
+        <div class="flex items-center justify-between gap-2">
+          <span class="font-semibold text-ink">
+            {#if l.event === 'access_denied'}<Ikon nama="bahaya" class="text-warn" /> {/if}{jenis[l.event] ?? l.event}
+          </span>
+          <span class="rounded-md bg-white/5 px-2 py-0.5 text-xs text-ink2">{l.user}</span>
+        </div>
+        <p class="mt-1.5 text-ink2">{l.detail}</p>
+        <p class="mt-1.5 text-xs text-mute">{tanggalText(l.timestamp)}</p>
+      </li>
+    {/each}
+  </ul>
+
+  <!-- Tampilan tabel untuk layar lebar -->
+  <div class="mt-4 hidden overflow-x-auto kartu md:block">
     <table class="w-full min-w-[32rem] text-left text-sm">
       <thead class="border-b border-line bg-white/5">
         <tr><th class="p-3">Waktu</th><th class="p-3">Pengguna</th><th class="p-3">Kejadian</th><th class="p-3">Keterangan</th></tr>
@@ -90,10 +107,10 @@
   </div>
 {/if}
 
-<div class="mt-4 flex items-center gap-3 text-sm">
+<div class="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-sm sm:flex sm:gap-3">
   <button type="button" onclick={() => (halaman -= 1)} disabled={halaman === 1 || memuat}
-    class="tombol tombol-sekunder tombol-kecil"><Ikon nama="kiri" /> Sebelumnya</button>
-  <span>Halaman {halaman}</span>
+    class="tombol tombol-sekunder tombol-kecil w-full sm:w-auto"><Ikon nama="kiri" /> Sebelumnya</button>
+  <span class="px-2 text-center text-ink2">Hal. {halaman}</span>
   <button type="button" onclick={() => (halaman += 1)} disabled={!logs || logs.length < PER_HALAMAN || memuat}
-    class="tombol tombol-sekunder tombol-kecil">Berikutnya <Ikon nama="kanan" /></button>
+    class="tombol tombol-sekunder tombol-kecil w-full sm:w-auto">Berikutnya <Ikon nama="kanan" /></button>
 </div>

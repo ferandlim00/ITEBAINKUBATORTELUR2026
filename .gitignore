@@ -4,6 +4,14 @@
 .env.production
 !.env.example
 !.env.docker
+firebase-service-account.json
+*firebase-adminsdk*.json
+android-app/app/google-services.json
+android-app/.gradle/
+android-app/build/
+android-app/app/build/
+android-app/local.properties
+*.apk
 
 # Node / SvelteKit
 node_modules/

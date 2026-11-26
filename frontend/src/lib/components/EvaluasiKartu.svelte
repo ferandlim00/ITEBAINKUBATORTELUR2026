@@ -37,9 +37,9 @@
 
     <dl class="mt-3 grid grid-cols-2 gap-y-2 text-sm">
       <dt class="text-mute">Rata-rata</dt><dd class="text-right font-medium">{f(hasil.rata)} {unit}</dd>
-      <dt class="text-mute">Target</dt><dd class="text-right font-medium">{target} {unit}</dd>
+      <dt class="text-mute">Target</dt><dd class="text-right font-medium">{target != null ? `${target} ${unit}` : `Rentang aman (${min}–${max} ${unit})`}</dd>
       <dt class="text-mute">Simpangan baku</dt><dd class="text-right font-medium">{f(hasil.simpangan)} {unit}</dd>
-      <dt class="text-mute">Jarak rata-rata ke target (RMSE)</dt><dd class="text-right font-medium">{f(hasil.rmse)} {unit}</dd>
+      <dt class="text-mute">{target != null ? 'Jarak rata-rata ke target (RMSE)' : 'Jarak ke titik tengah aman (RMSE)'}</dt><dd class="text-right font-medium">{f(hasil.rmse)} {unit}</dd>
       <dt class="text-mute">Penyimpangan terbesar</dt><dd class="text-right font-medium">{f(hasil.devMaks)} {unit}</dd>
       <dt class="text-mute">Jumlah data</dt><dd class="text-right font-medium">{hasil.n} titik</dd>
     </dl>

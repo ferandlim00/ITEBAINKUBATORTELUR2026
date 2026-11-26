@@ -86,17 +86,17 @@
       <div class="rounded-xl border border-bad/60 bg-bad/10 p-3 text-sm text-bad">
         <p class="font-medium"><Ikon nama="bahaya" /> Yakin menghentikan inkubasi?</p>
         <p class="mt-1">Pemanasan dan pembalikan telur akan berhenti. Telur bisa rusak jika terlalu lama tanpa pemanas.</p>
-        <div class="mt-3 flex gap-2">
+        <div class="mt-3 grid grid-cols-2 gap-2 sm:flex">
           <button type="button" onclick={berhenti} class="tombol tombol-bahaya">Ya, hentikan</button>
           <button type="button" onclick={() => (konfirmasi = false)} class="tombol tombol-sekunder">Batal</button>
         </div>
       </div>
     {:else if inc.status === 'running'}
-      <button type="button" onclick={() => (konfirmasi = true)} disabled={terkunci || sibuk} class="tombol tombol-garis-bahaya">
+      <button type="button" onclick={() => (konfirmasi = true)} disabled={terkunci || sibuk} class="tombol tombol-garis-bahaya w-full sm:w-auto">
         {sibuk ? 'Mengirim…' : 'Berhenti'}
       </button>
     {:else}
-      <button type="button" onclick={() => onkirim('start')} disabled={terkunci || sibuk} class="tombol">
+      <button type="button" onclick={() => onkirim('start')} disabled={terkunci || sibuk} class="tombol w-full sm:w-auto">
         {sibuk ? 'Mengirim…' : inc.status === 'finished' ? 'Mulai inkubasi baru' : 'Mulai'}
       </button>
     {/if}

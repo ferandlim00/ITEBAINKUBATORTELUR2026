@@ -254,9 +254,9 @@ Setelah Dashboard Web di `http://IP_VPS_ANDA` berstatus **Online**:
 1. Di Web, buka menu **Kontrol** di sebelah kiri.
 2. Pada bagian **Siklus Inkubasi**, klik tombol **Mulai Inkubasi**.
 3. Tunggu maksimal **5 detik**:
-   - Di layar **OLED ESP32** (dan di **Serial Monitor**), akan langsung muncul tulisan:
-     `[INKUBASI] Siklus 21 hari DIMULAI.` dan OLED berubah menjadi `H-01/21 TURN`.
-   - Di halaman **Dashboard Web**, status berubah menjadi **Hari ke 1 dari 21 (Fase Pemutaran)**.
+   - Di layar **OLED-2 ESP32** (dan di **Serial Monitor**), akan langsung muncul tulisan:
+     `[INKUBASI] Siklus 21 hari DIMULAI.` dan OLED-2 menampilkan splash `SIKLUS DIMULAI` / `DAY 01/21` lalu status fase `SETTER` (Hari 1–18, dan `LOCKDOWN` pada Hari 19–21).
+   - Di halaman **Dashboard Web**, status berubah menjadi **Hari ke 1 dari 21** dengan tahapan **Masa pembalikan telur**.
 4. Coba juga di menu **Kontrol** ubah **Lampu Pemanas** ke **Manual (`50%`)** lalu klik **Terapkan**:
    - Dalam 5 detik, layar OLED ESP32 akan berubah dari `Lampu : ...% (FUZZY)` menjadi `Lampu : 50% (MAN)`.
    - Klik kembali **Otomatis (Fuzzy)** untuk mengembalikan kendali ke **Logika Fuzzy Mamdani**.

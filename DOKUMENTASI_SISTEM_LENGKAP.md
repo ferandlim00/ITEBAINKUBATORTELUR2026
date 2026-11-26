@@ -151,7 +151,7 @@ Untuk menjaga suhu tetap stabil di sekitar target (`TEMP_DEFAULT_TARGET = 37.5f`
 ### E. Siklus Kerja `setup()` dan `loop()` ESP32
 
 1. `readSensorData()` tiap **`2 detik`** (`SENSOR_READ_INTERVAL_MS = 2000UL`) membaca SHT30 (`0x44`).
-2. `updateOledDisplay()` tiap **`1 detik`** (`OLED_UPDATE_INTERVAL_MS = 1000UL`) memperbarui tampilan layar OLED `128x64` dengan bahasa ramah awam (Kapan Mulai `DD/MM/YYYY` WIB, Progres Hari `Hari X/21`, Sesi `Putar Telur` / `Tidak Putar` / `Belum Jalan`, Suhu `C`, Kelembapan `%`, dan Status Koneksi `Berhasil` / `Gagal Web` / `Putus WiFi`).
+2. `updateOledDisplay()` tiap **`1 detik`** (`OLED_UPDATE_INTERVAL_MS = 1000UL`) memperbarui tampilan dual layar OLED `128x64` (`tampilOLED1()` untuk Suhu, Kelembapan, Jam WIB, ikon termometer & telur; `tampilOLED2()` untuk ikon Wi-Fi & RSSI/`OFFLINE`, fase `SIAGA` / `SETTER` / `LOCKDOWN` / `SELESAI`, progres `DAY XX/21`, serta waktu mulai `Mulai:DD/MM/YY HH:MM` WIB).
 3. `sendTelemetryAndPollBackend()` tiap **`5 detik`** (`TELEMETRY_INTERVAL_MS = 5000UL`) mengirim data telemetri ke `BACKEND_TELEMETRY_URL` menggunakan header `X-Device-Key` (`DEVICE_API_KEY`) dan `DEVICE_ID = "inkubator-01"`, sekaligus merakit kondisi perangkat lewat `buildDeviceCondition()`. *(Catatan VPS: arahkan `BACKEND_TELEMETRY_URL` ke IP/domain VPS melalui `/api/device/telemetry`, dan lihat Bagian 7 bila memakai HTTPS).*
 4. Saat menerima respons dari Backend, ESP32 menjalankan:
    - **`processIncomingSettings()`:** Menerapkan pengaturan terbaru termasuk pergantian Wi-Fi melalui `applyNewWifiWithRollback()`. Jika gagal tersambung ke Wi-Fi baru dalam batas **`30 detik`** (`WIFI_CONNECT_TIMEOUT_MS = 30000UL`), perangkat melakukan rollback otomatis.

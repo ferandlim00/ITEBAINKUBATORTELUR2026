@@ -28,7 +28,8 @@
  *
  * B. Library Bawaan Core ESP32 (Otomatis Ada Saat Install Board "esp32 by Espressif Systems"):
  *   - <Arduino.h>, <Wire.h>, <WiFi.h>, <WiFiClientSecure.h>, <HTTPClient.h>,
- *     <Preferences.h>, <time.h>, <esp_arduino_version.h>, <soc/gpio_struct.h>
+ *     <WebServer.h>, <DNSServer.h>, <Preferences.h>, <time.h>,
+ *     <esp_arduino_version.h>, <soc/gpio_struct.h>
  * ============================================================================
  */
 
@@ -38,6 +39,8 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
+#include <WebServer.h>
+#include <DNSServer.h>
 #include <Preferences.h>
 #include <Wire.h>
 #include <time.h>
@@ -73,21 +76,31 @@
 #define OLED_RESET          -1
 
 // ============================================================================
-// 2. KONFIGURASI JARINGAN, BACKEND GO FIBER, & IDENTITAS ALAT
+// 2. KONFIGURASI JARINGAN, HOTSPOT PORTAL, BACKEND GO FIBER, & IDENTITAS ALAT
 // ============================================================================
-const char* DEVICE_ID             = "inkubator-01";
-const char* DEFAULT_WIFI_SSID     = "Hoho";
-const char* DEFAULT_WIFI_PASS     = "0987654321";
+const char* DEVICE_ID              = "inkubator-01";
+const char* DEFAULT_WIFI_SSID      = "";
+const char* DEFAULT_WIFI_PASS      = "";
 
-// URL Backend VPS Tailscale Aktif ("kelompok-1-incubator": 100.102.108.69),
-// Jembatan Wi-Fi Laptop (192.168.100.4 -> diteruskan ke 100.102.108.69:3000), & Custom Domain
-const char* BACKEND_TELEMETRY_URL = "http://100.102.108.69:3000/api/device/telemetry";
-const char* BACKEND_FALLBACK_URL  = "http://192.168.100.4:3000/api/device/telemetry";
-const char* BACKEND_DOMAIN_URL    = "https://itebaincubatortelur.cc.cd/api/device/telemetry";
-const char* DEVICE_API_KEY        = "secret-device-token-esp32";
+// Konfigurasi Hotspot Captive Portal untuk setup Wi-Fi dari HP tanpa ubah kode
+const char* AP_HOTSPOT_SSID        = "SmartHatchery-Setup";
+const char* AP_HOTSPOT_PASS        = "12345678";
+const IPAddress AP_LOCAL_IP(192, 168, 4, 1);
+const IPAddress AP_GATEWAY_IP(192, 168, 4, 1);
+const IPAddress AP_SUBNET_MASK(255, 255, 255, 0);
 
-const char* NTP_SERVER_1          = "pool.ntp.org";
-const char* NTP_SERVER_2          = "id.pool.ntp.org";
+// Daftar URL Backend: Domain Web HTTPS (Utama), Jembatan Wi-Fi Laptop, & IP VPS Tailscale
+const char* const BACKEND_DOMAIN_URL     = "https://app.itebaincubatortelur.cc.cd/api/device/telemetry";
+const char* const BACKEND_FALLBACK_URL   = "http://192.168.100.4:3000/api/device/telemetry";
+const char* const BACKEND_TELEMETRY_URL  = "http://100.102.108.69:3000/api/device/telemetry";
+const char* const DEVICE_API_KEY         = "secret-device-token-esp32";
+
+// Default utama saat ESP32 pertama kali dipakai (dapat diganti lewat Hotspot Portal)
+const char* const DEFAULT_BACKEND_URL    = BACKEND_DOMAIN_URL;
+const char* const DEFAULT_DEVICE_API_KEY = DEVICE_API_KEY;
+
+const char* NTP_SERVER_1           = "pool.ntp.org";
+const char* NTP_SERVER_2           = "id.pool.ntp.org";
 
 // ============================================================================
 // 3. BATAS KEAMANAN & KONSTANTA SISTEM (PRD V2.0 & KONTRAK API V2.1)
@@ -95,13 +108,27 @@ const char* NTP_SERVER_2          = "id.pool.ntp.org";
 const float TEMP_SAFE_MIN             = 36.5f;   // Batas aman bawah (°C)
 const float TEMP_SAFE_MAX             = 38.5f;   // Batas aman atas (°C)
 const float TEMP_DEFAULT_TARGET       = 37.5f;   // Target suhu optimal default (°C)
-const float HUMIDITY_WARN_MIN         = 45.0f;   // Batas pengaman kelembapan bawah (%RH)
-const float HUMIDITY_WARN_MAX         = 75.0f;   // Batas pengaman kelembapan atas (%RH)
+const float HUMIDITY_WARN_MIN         = 45.0f;   // Batas pengaman kelembapan bawah fase Setter (%RH)
+const float HUMIDITY_WARN_MAX         = 70.0f;   // Batas pengaman kelembapan atas fase Setter (%RH)
 
 const int   LAMP_MANUAL_MAX_PCT       = 80;      // Batas aman bohlam 60W saat manual (80%)
 const int   LAMP_AUTO_MAX_PCT         = 100;     // Batas bohlam saat Fuzzy Auto (100%)
 const int   VENT_ANGLE_MIN            = 0;       // Servo tertutup penuh (0°)
 const int   VENT_ANGLE_MAX            = 90;      // Servo terbuka penuh (90°)
+const int   VENT_MODE_ANGLES[4]       = { 0, 15, 40, 90 }; // 0=Tutup, 1=Oksigen Minimal, 2=Sirkulasi/Lockdown, 3=Buang Panas
+const float HUMIDITY_WARN_CLEAR_HYST  = 66.0f;   // Batas histeresis keluar dari mode buang lembap (%RH)
+const float HUMIDITY_LOCKDOWN_MIN     = 60.0f;   // Batas pengaman kelembapan bawah fase Lockdown (%RH)
+const float HUMIDITY_LOCKDOWN_MAX     = 78.0f;   // Batas kelembapan berlebih saat Lockdown (Hari 19-21)
+
+// Parameter Filter Sensor, Adaptasi Dimmer Smooth, & Anti-Goyang Servo
+const float TEMP_EMA_ALPHA            = 0.25f;   // Filter EMA suhu SHT30 (menghilangkan jitter 0.1 C)
+const float HUM_EMA_ALPHA             = 0.20f;   // Filter EMA kelembapan SHT30
+const int   TEMP_TREND_SAMPLES        = 5;       // Rentang tren laju suhu = 5 x 2 detik = 10 detik
+const float LAMP_ADAPTIVE_KI          = 0.40f;   // Gain koreksi adaptif ringan agar dimmer menemukan titik anteng
+const float LAMP_BIAS_MAX             = 35.0f;   // Batas koreksi adaptif ruangan (-35% s.d. +35%)
+const float LAMP_SLEW_FINE_PCT        = 1.5f;    // Maks pergeseran dimmer per 2s saat dekat target (|e| <= 0.45 C)
+const float LAMP_SLEW_COARSE_PCT      = 4.0f;    // Maks pergeseran dimmer per 2s saat pemanasan/pendinginan jauh
+const unsigned long VENT_MODE_DWELL_MS = 15000UL; // Jeda minimal pindah mode normal servo (15 detik)
 
 const int   MOTOR_INTERVAL_MIN        = 30;      // Interval jadwal putar min (menit)
 const int   MOTOR_INTERVAL_MAX        = 480;     // Interval jadwal putar max (menit)
@@ -116,7 +143,14 @@ const int   INCUBATION_LOCKDOWN_START = 19;      // Hari 19-21 masuk fase Lockdo
 const unsigned long TELEMETRY_INTERVAL_MS   = 5000UL;  // Kirim telemetri tiap 5 detik
 const unsigned long SENSOR_READ_INTERVAL_MS = 2000UL;  // Baca sensor & hitung Fuzzy tiap 2 detik
 const unsigned long OLED_UPDATE_INTERVAL_MS = 1000UL;  // Refresh layar OLED tiap 1 detik
+const unsigned long OLED_ANIM_INTERVAL_MS   = 250UL;   // Interval frame animasi OLED (4 fps)
 const unsigned long WIFI_CONNECT_TIMEOUT_MS = 30000UL; // Timeout uji Wi-Fi baru 30 detik
+const unsigned long BOOT_WIFI_TIMEOUT_MS    = 15000UL; // Timeout koneksi Wi-Fi saat boot
+const unsigned long PORTAL_CONNECT_WAIT_MS  = 20000UL; // Timeout uji Wi-Fi baru di portal
+const unsigned long PORTAL_AP_SHUTDOWN_MS   = 5000UL;  // Jeda matikan Hotspot setelah sukses
+const unsigned long WIFI_ANIM_CONNECTED_MS  = 4500UL;  // Durasi animasi OLED berhasil konek
+const unsigned long WIFI_ANIM_FAILED_MS     = 3000UL;  // Durasi animasi OLED gagal konek
+const unsigned long WIFI_RECONNECT_FAIL_MS  = 30000UL; // Buka hotspot otomatis bila putus > 30 detik
 
 // ============================================================================
 // 4. OBJEK PERANGKAT KERAS
@@ -128,6 +162,8 @@ Adafruit_SSD1306  oled2(OLED_WIDTH, OLED_HEIGHT, &I2C_Dua, OLED_RESET); // OLED-
 RTC_DS3231        rtc;
 Servo             mg90sServo;
 Preferences       prefs;
+WebServer         portalServer(80);
+DNSServer         portalDns;
 
 // ============================================================================
 // 5. DRIVER ROBOTDYN AC DIMMER (ZERO-CROSS GPIO 34 + TICK 100us GPIO 25)
@@ -203,12 +239,18 @@ struct IncubatorState {
   bool  rtcAvailable      = false;
 
   // Sensor & Target
-  float temperature       = 37.5f;
-  float prevTemperature   = 37.5f;
-  float targetTemperature = TEMP_DEFAULT_TARGET;
-  float humidity          = 58.0f;
-  int   sensorFailStreak  = 0;
-  bool  sensorError       = false;
+  float temperature         = 37.5f;
+  float prevTemperature     = 37.5f;
+  float filteredTemperature = 37.5f;
+  float filteredHumidity    = 58.0f;
+  float tempHistory[TEMP_TREND_SAMPLES] = { 37.5f, 37.5f, 37.5f, 37.5f, 37.5f };
+  uint8_t tempHistCount     = 0;
+  uint8_t tempHistIdx       = 0;
+  bool  sensorFilterSeeded  = false;
+  float targetTemperature   = TEMP_DEFAULT_TARGET;
+  float humidity            = 58.0f;
+  int   sensorFailStreak    = 0;
+  bool  sensorError         = false;
 
   // Siklus Inkubasi 21 Hari
   String incubationStatus = "idle"; // "idle" | "running" | "finished"
@@ -218,14 +260,22 @@ struct IncubatorState {
   String stage            = "";     // "turning" | "lockdown" | ""
 
   // Lampu Pemanas (RobotDyn AC Dimmer - Bohlam 60W)
-  String lampMode         = "auto"; // "auto" | "manual"
-  int    lampIntensity    = 0;      // 0..100 (auto), 0..80 (manual)
-  bool   lampFuzzyActive  = true;
+  String lampMode            = "auto"; // "auto" | "manual"
+  int    lampIntensity       = 0;      // 0..100 (auto), 0..80 (manual)
+  float  lampFloatPct        = 0.0f;   // Akumulator presisi float untuk pergeseran smooth
+  float  lampIntegralBias    = 0.0f;   // Trim adaptif menyesuaikan suhu ruangan
+  bool   lampSeedOnFirstAuto = true;
+  bool   lampFuzzyActive     = true;
 
-  // Ventilasi (Motor Servo MG90S GPIO 18)
-  String ventMode         = "auto"; // "auto" | "manual"
-  int    ventAngle        = 0;      // 0..90 derajat
-  bool   ventFuzzyActive  = true;
+  // Ventilasi (Motor Servo MG90S GPIO 18 - 4 Mode Otomatis Bertahap / Manual)
+  String ventMode                = "auto"; // "auto" | "manual"
+  int    ventAngle               = 15;     // 0..90 derajat
+  int    ventDiscreteMode        = 1;      // 0=Tutup(0°), 1=Oksigen(15°), 2=Sirkulasi(40°), 3=Darurat(90°)
+  bool   ventHighHumidityLatched = false;
+  bool   ventForceEvalImmediate  = true;
+  bool   ventModeInitialized     = false;
+  unsigned long lastVentModeChangeMs = 0;
+  bool   ventFuzzyActive         = false;
 
   // Status Jadwal Pembalikan (Kompatibilitas Kontrak API v2.1)
   bool          motorRunning          = false;
@@ -240,9 +290,11 @@ struct IncubatorState {
   int motorDurationSeconds = 20;
   int motorSpeedPercent    = 50;
 
-  // Kredensial Wi-Fi Aktif
+  // Kredensial Wi-Fi & Konfigurasi Server Aktif (tersimpan di NVS)
   String wifiSsid          = DEFAULT_WIFI_SSID;
   String wifiPass          = DEFAULT_WIFI_PASS;
+  String backendUrl        = DEFAULT_BACKEND_URL;
+  String deviceApiKey      = DEFAULT_DEVICE_API_KEY;
 
   // Alert Komunikasi (setelah gagal ganti Wi-Fi & rollback)
   bool   commAlertPending  = false;
@@ -259,6 +311,51 @@ struct IncubatorState {
   String lastCmdStatus     = ""; // "executed" | "failed"
   time_t lastCmdUpdatedAt  = 0;
 } state;
+
+// Pertukaran data thread-safe antara Core 1 (loop kendali suhu) & Core 0 (HTTP/TLS non-blocking)
+struct NetExchange {
+  SemaphoreHandle_t mutex          = NULL;
+  volatile bool     pauseRequested = false;
+  volatile bool     inFlight       = false;
+  bool              jobPending     = false;
+  String            payload;
+  String            urls[4];
+  int               urlCount       = 0;
+  String            apiKey;
+  bool              resultReady    = false;
+  bool              resultConnected = false;
+  String            resultBody;
+  int               resultHttpCode = -1;
+} netBox;
+TaskHandle_t netTaskHandle = NULL;
+const unsigned long NET_FAILURE_BACKOFF_MS = 15000UL;
+
+enum WifiUiPhase {
+  WIFI_UI_NORMAL = 0,
+  WIFI_UI_PORTAL,
+  WIFI_UI_CONNECTING,
+  WIFI_UI_CONNECTED_ANIM,
+  WIFI_UI_FAILED_ANIM
+};
+
+bool          portalActive            = false;
+bool          portalRoutesRegistered  = false;
+bool          portalConnecting        = false;
+bool          portalShutdownPending   = false;
+unsigned long portalShutdownAtMs      = 0;
+unsigned long wifiConnectStartMs      = 0;
+unsigned long wifiDisconnectedSinceMs = 0;
+WifiUiPhase   wifiUiPhase             = WIFI_UI_NORMAL;
+unsigned long wifiAnimStartMs         = 0;
+uint8_t       wifiAnimFrame           = 0;
+String        pendingWifiSsid         = "";
+String        pendingWifiPass         = "";
+String        pendingBackendUrl       = "";
+String        pendingApiKey           = "";
+String        portalStatusText        = "idle";
+String        portalStatusMsg         = "";
+String        connectedSsidDisplay    = "";
+String        connectedIpDisplay      = "";
 
 unsigned long lastSensorMillis    = 0;
 unsigned long lastTelemetryMillis = 0;
@@ -320,6 +417,14 @@ void loadSettingsFromNVS() {
   prefs.begin("hatchery", true);
   state.wifiSsid             = prefs.getString("wifi_ssid", DEFAULT_WIFI_SSID);
   state.wifiPass             = prefs.getString("wifi_pass", DEFAULT_WIFI_PASS);
+  state.backendUrl           = prefs.getString("backend_url", DEFAULT_BACKEND_URL);
+  state.deviceApiKey         = prefs.getString("api_key", DEFAULT_DEVICE_API_KEY);
+  if (state.backendUrl.isEmpty() ||
+      state.backendUrl == "https://itebaincubatortelur.cc.cd/api/device/telemetry" ||
+      state.backendUrl == "https://aapanel.itebaincubatortelur.cc.cd/api/device/telemetry") {
+    state.backendUrl = DEFAULT_BACKEND_URL;
+  }
+  if (state.deviceApiKey.isEmpty()) state.deviceApiKey = DEFAULT_DEVICE_API_KEY;
   state.targetTemperature    = prefs.getFloat("target_temp", TEMP_DEFAULT_TARGET);
   state.motorIntervalMinutes = prefs.getInt("m_interval", 120);
   state.motorDurationSeconds = prefs.getInt("m_duration", 20);
@@ -332,11 +437,17 @@ void loadSettingsFromNVS() {
   state.lampMode             = prefs.getString("lamp_mode", "auto");
   state.lampIntensity        = prefs.getInt("lamp_int", 0);
   state.ventMode             = prefs.getString("vent_mode", "auto");
-  state.ventAngle            = prefs.getInt("vent_ang", 0);
+  state.ventAngle            = prefs.getInt("vent_ang", VENT_MODE_ANGLES[1]);
   prefs.end();
 
-  state.lampFuzzyActive = (state.lampMode == "auto");
-  state.ventFuzzyActive = (state.ventMode == "auto");
+  state.lampFloatPct        = (float)state.lampIntensity;
+  state.lampSeedOnFirstAuto = true;
+  state.lampFuzzyActive     = (state.lampMode == "auto");
+  state.ventFuzzyActive     = false; // Ventilasi otomatis memakai 4 mode bertahap
+  if (state.ventAngle <= 5)       state.ventDiscreteMode = 0;
+  else if (state.ventAngle <= 25) state.ventDiscreteMode = 1;
+  else if (state.ventAngle <= 65) state.ventDiscreteMode = 2;
+  else                            state.ventDiscreteMode = 3;
 }
 
 void saveSettingsToNVS() {
@@ -347,6 +458,8 @@ void saveSettingsToNVS() {
   prefs.begin("hatchery", false);
   prefs.putString("wifi_ssid", state.wifiSsid);
   prefs.putString("wifi_pass", state.wifiPass);
+  prefs.putString("backend_url", state.backendUrl);
+  prefs.putString("api_key", state.deviceApiKey);
   prefs.putFloat("target_temp", state.targetTemperature);
   prefs.putInt("m_interval", state.motorIntervalMinutes);
   prefs.putInt("m_duration", state.motorDurationSeconds);
@@ -443,15 +556,12 @@ void updateBuzzerAlarm() {
 }
 
 // ============================================================================
-// 10. SISTEM INFERENSI LOGIKA FUZZY MAMDANI (2 INPUT -> 2 OUTPUT, 9 ATURAN)
+// 10. KENDALI TERPADU: FUZZY MAMDANI SMOOTH (DIMMER) & 4-MODE SERVO VENTILASI
 // ============================================================================
-// Tahapan Metode Fuzzy Mamdani:
-//   1. Fuzzifikasi   : Mengubah nilai sensor (Error Suhu & Perubahan Suhu) ke derajat
-//                      keanggotaan [0..1] menggunakan kurva Bahu dan Segitiga.
-//   2. Inferensi MIN : Mengevaluasi 9 aturan IF-THEN (3x3) dengan operator AND (MIN)
-//                      untuk memotong (clipping) tinggi kurva himpunan output.
-//   3. Agregasi MAX  : Menggabungkan seluruh kurva output yang terpotong dengan MAX.
-//   4. Defuzzifikasi : Menghitung titik berat kurva gabungan (Centroid / Center of Area).
+// A. Lampu Pemanas (AC Dimmer): Fuzzy Mamdani (2 Input -> 1 Output) + Filter EMA
+//    + Trim Adaptif Ruangan + Pergeseran Halus (Slew-Rate Limiter +/-1.5%..4%).
+// B. Ventilasi (Servo MG90S): 4 Mode Posisi Tetap + Histeresis + Jeda 15 detik
+//    (0° Tutup, 15° Oksigen Minimal, 40° Sirkulasi/Lockdown/Lembap, 90° Buang Panas).
 
 enum FuzzyErrorSet {
   ERR_DINGIN = 0,
@@ -473,17 +583,11 @@ enum FuzzyLampSet {
   LAMP_SANGAT_TERANG = 4
 };
 
-enum FuzzyVentSet {
-  VENT_TUTUP       = 0,
-  VENT_BUKA_KECIL  = 1,
-  VENT_BUKA_SEDANG = 2,
-  VENT_BUKA_LEBAR  = 3,
-  VENT_BUKA_PENUH  = 4
-};
-
-struct MamdaniRuleOutput {
-  FuzzyLampSet lampSet;
-  FuzzyVentSet ventSet;
+enum VentDiscreteMode {
+  VENT_MODE_TUTUP     = 0, // 0°  : Tutup saat pemanasan awal (Setter saja)
+  VENT_MODE_OKSIGEN   = 1, // 15° : Bukaan minimal suplai O2/CO2 harian (hemat panas & lembap)
+  VENT_MODE_SIRKULASI = 2, // 40° : Lockdown (Hari 19-21), hangat ringan, atau kelembapan > 70%
+  VENT_MODE_DARURAT   = 3  // 90° : Buang panas berlebih / darurat
 };
 
 float fuzzyTriangle(float x, float a, float b, float c) {
@@ -505,7 +609,7 @@ float fuzzyRightShoulder(float x, float a, float b) {
   return (x - a) / (b - a);
 }
 
-// Kurva Keanggotaan Output 1: Intensitas Lampu Pemanas (0% - 100%)
+// Kurva Keanggotaan Output Lampu Pemanas (0% - 100%)
 float muOutputLamp(int setIdx, float x) {
   switch (setIdx) {
     case LAMP_MATI:          return fuzzyLeftShoulder(x, 0.0f, 10.0f);
@@ -514,18 +618,6 @@ float muOutputLamp(int setIdx, float x) {
     case LAMP_TERANG:        return fuzzyTriangle(x, 55.0f, 75.0f, 95.0f);
     case LAMP_SANGAT_TERANG: return fuzzyRightShoulder(x, 90.0f, 100.0f);
     default:                 return 0.0f;
-  }
-}
-
-// Kurva Keanggotaan Output 2: Sudut Bukaan Servo Ventilasi (0° - 90°)
-float muOutputVent(int setIdx, float x) {
-  switch (setIdx) {
-    case VENT_TUTUP:       return fuzzyLeftShoulder(x, 0.0f, 10.0f);
-    case VENT_BUKA_KECIL:  return fuzzyTriangle(x, 5.0f, 25.0f, 45.0f);
-    case VENT_BUKA_SEDANG: return fuzzyTriangle(x, 25.0f, 45.0f, 65.0f);
-    case VENT_BUKA_LEBAR:  return fuzzyTriangle(x, 45.0f, 65.0f, 85.0f);
-    case VENT_BUKA_PENUH:  return fuzzyRightShoulder(x, 80.0f, 90.0f);
-    default:               return 0.0f;
   }
 }
 
@@ -538,7 +630,6 @@ float defuzzifyCentroidLamp(const float clipLevel[5]) {
     float muAgg = 0.0f;
     for (int k = 0; k < 5; k++) {
       if (clipLevel[k] > 0.0f) {
-        // Implikasi MIN (potong kurva) lalu Agregasi MAX (gabung kurva)
         float clipped = fminf(clipLevel[k], muOutputLamp(k, xf));
         muAgg = fmaxf(muAgg, clipped);
       }
@@ -549,113 +640,195 @@ float defuzzifyCentroidLamp(const float clipLevel[5]) {
   return (den > 0.0001f) ? (num / den) : 50.0f;
 }
 
-// Defuzzifikasi Mamdani Centroid (Center of Area) untuk Servo (Domain 0..90°)
-float defuzzifyCentroidVent(const float clipLevel[5]) {
-  float num = 0.0f;
-  float den = 0.0f;
-  for (int x = 0; x <= 90; x++) {
-    float xf = (float)x;
-    float muAgg = 0.0f;
-    for (int k = 0; k < 5; k++) {
-      if (clipLevel[k] > 0.0f) {
-        // Implikasi MIN (potong kurva) lalu Agregasi MAX (gabung kurva)
-        float clipped = fminf(clipLevel[k], muOutputVent(k, xf));
-        muAgg = fmaxf(muAgg, clipped);
-      }
-    }
-    num += xf * muAgg;
-    den += muAgg;
+bool isIncubationLockdownPhase() {
+  return (state.stage == "lockdown") ||
+         (state.incubationStatus == "running" && state.currentDay >= INCUBATION_LOCKDOWN_START);
+}
+
+void getActiveHumidityBounds(float& outMin, float& outMax) {
+  if (isIncubationLockdownPhase()) {
+    outMin = HUMIDITY_LOCKDOWN_MIN;
+    outMax = HUMIDITY_LOCKDOWN_MAX;
+  } else {
+    outMin = HUMIDITY_WARN_MIN;
+    outMax = HUMIDITY_WARN_MAX;
   }
-  return (den > 0.0001f) ? (num / den) : 25.0f;
+}
+
+void evaluateVentilationModes(float e, bool isLockdown) {
+  if (state.ventMode != "auto") {
+    state.ventFuzzyActive = false;
+    return;
+  }
+  state.ventFuzzyActive = false; // Otomatis memakai 4 mode bertahap agar servo tidak goyang
+
+  float T = state.filteredTemperature;
+  float H = state.filteredHumidity;
+
+  // Histeresis kelembapan tinggi (Setter > 70% masuk, < 66% keluar; Lockdown > 78% masuk, < 74% keluar)
+  float humHighOn  = isLockdown ? HUMIDITY_LOCKDOWN_MAX : HUMIDITY_WARN_MAX;
+  float humHighOff = humHighOn - 4.0f;
+  if (H > humHighOn) {
+    state.ventHighHumidityLatched = true;
+  } else if (H < humHighOff) {
+    state.ventHighHumidityLatched = false;
+  }
+
+  int currentMode = constrain(state.ventDiscreteMode, 0, 3);
+  int desiredMode = currentMode;
+
+  bool thermalEmergency = (T >= TEMP_SAFE_MAX) || (state.temperature >= TEMP_SAFE_MAX) || (e >= 0.70f);
+  bool coldEmergency    = (T <= TEMP_SAFE_MIN) || (state.temperature <= TEMP_SAFE_MIN);
+
+  if (thermalEmergency) {
+    desiredMode = VENT_MODE_DARURAT;
+  } else if (coldEmergency) {
+    // Saat Lockdown, jangan pernah tutup 0° agar embrio yang mulai bernapas paru-paru tetap mendapat O2
+    desiredMode = isLockdown ? VENT_MODE_OKSIGEN : VENT_MODE_TUTUP;
+  } else if (currentMode == VENT_MODE_DARURAT) {
+    desiredMode = (e <= 0.45f && T <= TEMP_SAFE_MAX - 0.25f) ? VENT_MODE_SIRKULASI : VENT_MODE_DARURAT;
+  } else if (isLockdown) {
+    // Fase Lockdown (Hari 19-21): bukaan dasar naik ke Mode 2 (40°) untuk kebutuhan O2 puncak
+    if (e < -0.70f) {
+      desiredMode = VENT_MODE_OKSIGEN;
+    } else if (currentMode <= VENT_MODE_OKSIGEN && e < -0.40f) {
+      desiredMode = VENT_MODE_OKSIGEN;
+    } else {
+      desiredMode = VENT_MODE_SIRKULASI;
+    }
+  } else {
+    // Fase Setter (Hari 1-18) atau Idle: fokus menjaga O2 minimal (15°) agar dimmer anteng
+    bool needSirkulasi = (e >= 0.30f) || (state.ventHighHumidityLatched && e >= -0.30f);
+    bool keepSirkulasi = (e >  0.12f) || (state.ventHighHumidityLatched && e >= -0.35f);
+    bool needTutup     = (e <= -0.60f);
+    bool keepTutup     = (e <  -0.25f);
+
+    if (needSirkulasi || (currentMode == VENT_MODE_SIRKULASI && keepSirkulasi)) {
+      desiredMode = VENT_MODE_SIRKULASI;
+    } else if (needTutup || (currentMode == VENT_MODE_TUTUP && keepTutup)) {
+      desiredMode = VENT_MODE_TUTUP;
+    } else {
+      desiredMode = VENT_MODE_OKSIGEN;
+    }
+  }
+
+  unsigned long nowMs = millis();
+  bool bypassDwell = !state.ventModeInitialized ||
+                     state.ventForceEvalImmediate ||
+                     thermalEmergency ||
+                     coldEmergency;
+
+  if (desiredMode != currentMode) {
+    if (bypassDwell || (nowMs - state.lastVentModeChangeMs >= VENT_MODE_DWELL_MS)) {
+      state.ventDiscreteMode     = desiredMode;
+      state.lastVentModeChangeMs = nowMs;
+      state.ventModeInitialized  = true;
+      applyVentilationOutput(VENT_MODE_ANGLES[desiredMode]);
+      Serial.printf("[VENT] Pindah ke Mode %d (%d deg) | e=%.2fC H=%.0f%% Stage=%s\n",
+                    desiredMode, VENT_MODE_ANGLES[desiredMode], e, H,
+                    isLockdown ? "LOCKDOWN" : "SETTER");
+    }
+  } else if (!state.ventModeInitialized || state.ventForceEvalImmediate ||
+             state.ventAngle != VENT_MODE_ANGLES[currentMode]) {
+    state.lastVentModeChangeMs = nowMs;
+    state.ventModeInitialized  = true;
+    applyVentilationOutput(VENT_MODE_ANGLES[currentMode]);
+  }
+  state.ventForceEvalImmediate = false;
 }
 
 void evaluateFuzzyControl() {
-  float e  = state.temperature - state.targetTemperature;
-  float de = state.temperature - state.prevTemperature;
+  float e  = state.filteredTemperature - state.targetTemperature;
+  float de = 0.0f;
+  if (state.tempHistCount > 1) {
+    uint8_t oldestIdx = (state.tempHistCount < TEMP_TREND_SAMPLES)
+                        ? 0
+                        : (state.tempHistIdx % TEMP_TREND_SAMPLES);
+    de = state.filteredTemperature - state.tempHistory[oldestIdx];
+  }
 
-  // 1. FUZZIFIKASI INPUT 1: Error Suhu (e) -> 3 Himpunan (Dingin, Normal, Panas)
+  // 1. FUZZIFIKASI INPUT 1: Error Suhu (e) -> pita normal rapat +/-0.35 C
   float muError[3];
-  muError[ERR_DINGIN] = fuzzyLeftShoulder(e, -1.0f, 0.0f);
-  muError[ERR_NORMAL] = fuzzyTriangle(e, -0.5f, 0.0f, 0.5f);
-  muError[ERR_PANAS]  = fuzzyRightShoulder(e, 0.0f, 1.0f);
+  muError[ERR_DINGIN] = fuzzyLeftShoulder(e, -0.80f, -0.05f);
+  muError[ERR_NORMAL] = fuzzyTriangle(e, -0.35f, 0.0f, 0.35f);
+  muError[ERR_PANAS]  = fuzzyRightShoulder(e, 0.05f, 0.80f);
 
-  // 2. FUZZIFIKASI INPUT 2: Perubahan Suhu (de) -> 3 Himpunan (Turun, Stabil, Naik)
+  // 2. FUZZIFIKASI INPUT 2: Perubahan Suhu 10 detik terakhir (de) -> mencegah kaget jitter 2s
   float muDelta[3];
-  muDelta[DERR_TURUN]  = fuzzyLeftShoulder(de, -0.20f, 0.0f);
+  muDelta[DERR_TURUN]  = fuzzyLeftShoulder(de, -0.18f, -0.02f);
   muDelta[DERR_STABIL] = fuzzyTriangle(de, -0.10f, 0.0f, 0.10f);
-  muDelta[DERR_NAIK]   = fuzzyRightShoulder(de, 0.0f, 0.20f);
+  muDelta[DERR_NAIK]   = fuzzyRightShoulder(de, 0.02f, 0.18f);
 
-  // 3. BASIS ATURAN MAMDANI (3x3 = 9 Aturan IF-THEN Linguistik)
-  const MamdaniRuleOutput rules[3][3] = {
-    // Baris 1: Saat Suhu DINGIN (de: Turun, Stabil, Naik)
-    {
-      { LAMP_SANGAT_TERANG, VENT_TUTUP },
-      { LAMP_SANGAT_TERANG, VENT_TUTUP },
-      { LAMP_TERANG,        VENT_BUKA_KECIL }
-    },
-    // Baris 2: Saat Suhu NORMAL / IDEAL (de: Turun, Stabil, Naik)
-    {
-      { LAMP_TERANG,        VENT_BUKA_KECIL },
-      { LAMP_SEDANG,        VENT_BUKA_KECIL },
-      { LAMP_REDUP,         VENT_BUKA_SEDANG }
-    },
-    // Baris 3: Saat Suhu PANAS (de: Turun, Stabil, Naik)
-    {
-      { LAMP_REDUP,         VENT_BUKA_SEDANG },
-      { LAMP_MATI,          VENT_BUKA_LEBAR },
-      { LAMP_MATI,          VENT_BUKA_PENUH }
-    }
+  // 3. BASIS ATURAN MAMDANI LAMP (3x3 = 9 Aturan IF-THEN Linguistik)
+  const FuzzyLampSet lampRules[3][3] = {
+    // Suhu DINGIN (de: Turun, Stabil, Naik)
+    { LAMP_SANGAT_TERANG, LAMP_SANGAT_TERANG, LAMP_TERANG },
+    // Suhu NORMAL / IDEAL (de: Turun, Stabil, Naik)
+    { LAMP_TERANG,        LAMP_SEDANG,        LAMP_REDUP },
+    // Suhu PANAS (de: Turun, Stabil, Naik)
+    { LAMP_REDUP,         LAMP_MATI,          LAMP_MATI }
   };
 
-  // Evaluasi Inferensi MIN (AND) & Agregasi MAX pada Himpunan Output
   float clipLamp[5] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
-  float clipVent[5] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
-
   for (int i = 0; i < 3; i++) {
     for (int j = 0; j < 3; j++) {
-      float alpha = fminf(muError[i], muDelta[j]); // Operator AND = MIN
+      float alpha = fminf(muError[i], muDelta[j]);
       if (alpha > 0.0f) {
-        FuzzyLampSet outL = rules[i][j].lampSet;
-        FuzzyVentSet outV = rules[i][j].ventSet;
-        clipLamp[outL] = fmaxf(clipLamp[outL], alpha); // Agregasi = MAX
-        clipVent[outV] = fmaxf(clipVent[outV], alpha); // Agregasi = MAX
+        FuzzyLampSet outL = lampRules[i][j];
+        clipLamp[outL] = fmaxf(clipLamp[outL], alpha);
       }
     }
   }
 
-  // 4. DEFUZZIFIKASI CENTROID (Center of Area / Titik Berat)
+  // 4. DEFUZZIFIKASI CENTROID UNTUK LAMPU + TRIM ADAPTIF + SLEW-RATE HALUS
   float crispLamp = defuzzifyCentroidLamp(clipLamp);
-  float crispVent = defuzzifyCentroidVent(clipVent);
 
-  // Pengaman Ekstrem Suhu & Kelembapan Pasif (Sesuai PLAN.md):
-  if (state.temperature >= TEMP_SAFE_MAX) {
-    crispLamp = 0.0f;
-    crispVent = 90.0f;
-  } else if (state.temperature <= TEMP_SAFE_MIN) {
-    crispLamp = 100.0f;
-    crispVent = 0.0f;
-  }
-  if (state.humidity > HUMIDITY_WARN_MAX && e > -0.3f && crispVent < 35.0f) {
-    crispVent = 35.0f;
-  }
-
-  crispLamp = constrain(crispLamp, 0.0f, (float)LAMP_AUTO_MAX_PCT);
-  crispVent = constrain(crispVent, (float)VENT_ANGLE_MIN, (float)VENT_ANGLE_MAX);
-
-  // 5. Terapkan ke aktuator yang berstatus "auto"
   if (state.lampMode == "auto") {
     state.lampFuzzyActive = true;
-    applyLampOutput((int)round(crispLamp));
+
+    if (state.filteredTemperature >= TEMP_SAFE_MAX || state.temperature >= TEMP_SAFE_MAX) {
+      state.lampFloatPct        = 0.0f;
+      state.lampSeedOnFirstAuto = false;
+      applyLampOutput(0);
+    } else if (state.filteredTemperature <= TEMP_SAFE_MIN || state.temperature <= TEMP_SAFE_MIN) {
+      state.lampFloatPct        = (float)LAMP_AUTO_MAX_PCT;
+      state.lampSeedOnFirstAuto = false;
+      applyLampOutput(LAMP_AUTO_MAX_PCT);
+    } else {
+      if (state.lampSeedOnFirstAuto) {
+        state.lampFloatPct        = crispLamp;
+        state.lampSeedOnFirstAuto = false;
+      }
+
+      // Koreksi adaptif ringan agar titik seimbang dimmer menyesuaikan kondisi ruangan (anti-windup)
+      if (!state.sensorError && fabs(e) <= 1.20f && fabs(e) >= 0.03f) {
+        float prevTarget = crispLamp + state.lampIntegralBias;
+        bool windupUp    = (prevTarget >= (float)LAMP_AUTO_MAX_PCT) && (e < 0.0f);
+        bool windupDown  = (prevTarget <= 0.0f) && (e > 0.0f);
+        if (!windupUp && !windupDown) {
+          state.lampIntegralBias = constrain(
+            state.lampIntegralBias + (-e * LAMP_ADAPTIVE_KI),
+            -LAMP_BIAS_MAX,
+            LAMP_BIAS_MAX
+          );
+        }
+      }
+
+      float targetLamp   = constrain(crispLamp + state.lampIntegralBias, 0.0f, (float)LAMP_AUTO_MAX_PCT);
+      float maxStep      = (fabs(e) <= 0.45f) ? LAMP_SLEW_FINE_PCT : LAMP_SLEW_COARSE_PCT;
+      float deltaLamp    = constrain(targetLamp - state.lampFloatPct, -maxStep, maxStep);
+      state.lampFloatPct = constrain(state.lampFloatPct + deltaLamp, 0.0f, (float)LAMP_AUTO_MAX_PCT);
+      applyLampOutput((int)roundf(state.lampFloatPct));
+    }
   } else {
-    state.lampFuzzyActive = false;
+    state.lampFuzzyActive     = false;
+    state.lampFloatPct        = (float)state.lampIntensity;
+    state.lampSeedOnFirstAuto = false;
   }
 
-  if (state.ventMode == "auto") {
-    state.ventFuzzyActive = true;
-    applyVentilationOutput((int)round(crispVent));
-  } else {
-    state.ventFuzzyActive = false;
-  }
+  // 5. EVALUASI 4 MODE BERTAHAP SERVO VENTILASI
+  bool isLockdown = isIncubationLockdownPhase();
+  evaluateVentilationModes(e, isLockdown);
 }
 
 // ============================================================================
@@ -688,6 +861,7 @@ void startIncubationLocalOrRemote() {
   state.nextTurningEpoch = now + (state.motorIntervalMinutes * 60L);
   state.encoderOk        = true;
   state.turningStatus    = "idle";
+  state.ventForceEvalImmediate = true;
   saveSettingsToNVS();
   tampilSplashSiklusDimulai();
   Serial.println("[INKUBASI] Siklus 21 hari DIMULAI.");
@@ -704,6 +878,7 @@ void stopIncubationLocalOrRemote() {
   state.stage            = "";
   state.nextTurningEpoch = 0;
   state.turningStatus    = "idle";
+  state.ventForceEvalImmediate = true;
   saveSettingsToNVS();
   Serial.println("[INKUBASI] Siklus inkubasi DIHENTIKAN (Idle).");
 }
@@ -930,20 +1105,205 @@ void tampilOLED2(Adafruit_SSD1306& disp) {
   disp.display();
 }
 
+String truncateText(const String& s, size_t maxLen) {
+  if (s.length() <= maxLen) return s;
+  if (maxLen <= 2) return s.substring(0, maxLen);
+  return s.substring(0, maxLen - 2) + "..";
+}
+
+void tampilOLEDWifiPortal(Adafruit_SSD1306& disp) {
+  disp.clearDisplay();
+  disp.setTextColor(SSD1306_WHITE);
+  disp.setTextSize(1);
+
+  const unsigned char* ikon = ((wifiAnimFrame % 2) == 0) ? ICON_WIFI_3 : ICON_WIFI_1;
+  disp.drawBitmap(2, 2, ikon, 12, 10, SSD1306_WHITE);
+  disp.setCursor(18, 4);
+  disp.print("SETUP WIFI");
+  disp.drawFastHLine(0, 15, 128, SSD1306_WHITE);
+
+  disp.setCursor(4, 20);
+  disp.print("Hotspot:");
+  disp.setCursor(4, 30);
+  disp.print(truncateText(AP_HOTSPOT_SSID, 20));
+  disp.setCursor(4, 42);
+  disp.print("Pass: ");
+  disp.print(AP_HOTSPOT_PASS);
+  disp.setCursor(4, 53);
+  disp.print("Web : 192.168.4.1");
+
+  disp.display();
+}
+
+void tampilOLEDWifiConnecting(Adafruit_SSD1306& disp) {
+  disp.clearDisplay();
+  disp.setTextColor(SSD1306_WHITE);
+  disp.setTextSize(1);
+
+  uint8_t step = wifiAnimFrame % 3;
+  const unsigned char* ikon = (step == 0) ? ICON_WIFI_1 : (step == 1 ? ICON_WIFI_2 : ICON_WIFI_3);
+  disp.drawBitmap(2, 2, ikon, 12, 10, SSD1306_WHITE);
+  disp.setCursor(18, 4);
+  disp.print("MENGHUBUNGKAN");
+  disp.drawFastHLine(0, 15, 128, SSD1306_WHITE);
+
+  // Gelombang sinyal besar animasi di tengah atas
+  int cx = 64;
+  int cy = 32;
+  disp.fillCircle(cx, cy, 2, SSD1306_WHITE);
+  if (step >= 0) disp.drawCircle(cx, cy, 5, SSD1306_WHITE);
+  if (step >= 1) disp.drawCircle(cx, cy, 9, SSD1306_WHITE);
+  if (step >= 2) disp.drawCircle(cx, cy, 13, SSD1306_WHITE);
+  disp.fillRect(0, cy + 3, 128, 12, SSD1306_BLACK); // Potong separuh bawah agar berbentuk busur Wi-Fi
+
+  String targetSsid = pendingWifiSsid.length() > 0 ? pendingWifiSsid : state.wifiSsid;
+  disp.setCursor(4, 37);
+  disp.print("WiFi: ");
+  disp.print(truncateText(targetSsid, 14));
+
+  disp.setCursor(4, 47);
+  disp.print("Menyambung");
+  for (uint8_t i = 0; i <= step; i++) disp.print(".");
+
+  // Progress bar bergerak di bagian bawah
+  disp.drawRect(4, 57, 120, 5, SSD1306_WHITE);
+  int barPos = 6 + ((wifiAnimFrame * 14) % 92);
+  disp.fillRect(barPos, 58, 24, 3, SSD1306_WHITE);
+
+  disp.display();
+}
+
+void tampilOLEDWifiConnected(Adafruit_SSD1306& disp) {
+  disp.clearDisplay();
+  disp.setTextColor(SSD1306_WHITE);
+  disp.setTextSize(1);
+
+  unsigned long elapsed = millis() - wifiAnimStartMs;
+
+  if (elapsed < 700UL) {
+    // Fase 1: Lingkaran konfirmasi membesar & sinyal Wi-Fi naik
+    int r = (int)map((long)elapsed, 0L, 700L, 3L, 12L);
+    disp.drawCircle(64, 24, r, SSD1306_WHITE);
+    const unsigned char* ikon = (elapsed < 230UL) ? ICON_WIFI_1 : (elapsed < 460UL ? ICON_WIFI_2 : ICON_WIFI_3);
+    disp.drawBitmap(58, 42, ikon, 12, 10, SSD1306_WHITE);
+    disp.display();
+    return;
+  }
+
+  if (elapsed < 1300UL) {
+    // Fase 2: Tanda centang tergambar bertahap di dalam lingkaran
+    disp.drawCircle(64, 22, 12, SSD1306_WHITE);
+    disp.drawLine(58, 22, 62, 26, SSD1306_WHITE);
+    disp.drawLine(58, 23, 62, 27, SSD1306_WHITE);
+    if (elapsed >= 950UL) {
+      disp.drawLine(62, 26, 70, 17, SSD1306_WHITE);
+      disp.drawLine(62, 27, 70, 18, SSD1306_WHITE);
+    }
+    disp.setCursor(32, 42);
+    disp.print("TERHUBUNG!");
+    disp.display();
+    return;
+  }
+
+  // Fase 3: Informasi lengkap Wi-Fi yang terhubung + IP lokal + bar durasi
+  disp.drawBitmap(2, 2, ICON_WIFI_3, 12, 10, SSD1306_WHITE);
+  disp.setCursor(18, 4);
+  disp.print("WIFI TERHUBUNG!");
+  disp.drawFastHLine(0, 15, 128, SSD1306_WHITE);
+
+  disp.drawCircle(16, 30, 9, SSD1306_WHITE);
+  disp.drawLine(11, 30, 14, 33, SSD1306_WHITE);
+  disp.drawLine(14, 33, 21, 26, SSD1306_WHITE);
+  disp.drawLine(14, 34, 21, 27, SSD1306_WHITE);
+
+  disp.setCursor(30, 21);
+  disp.print("Terhubung ke:");
+  disp.setCursor(30, 31);
+  disp.print(truncateText(connectedSsidDisplay, 16));
+
+  disp.setCursor(4, 46);
+  disp.print("IP: ");
+  disp.print(connectedIpDisplay);
+
+  long rem = (long)WIFI_ANIM_CONNECTED_MS - (long)elapsed;
+  if (rem < 0) rem = 0;
+  int barW = (int)map(rem, 0L, (long)(WIFI_ANIM_CONNECTED_MS - 1300UL), 0L, 120L);
+  barW = constrain(barW, 0, 120);
+  disp.drawFastHLine(4, 59, barW, SSD1306_WHITE);
+
+  disp.display();
+}
+
+void tampilOLEDWifiFailed(Adafruit_SSD1306& disp) {
+  disp.clearDisplay();
+  disp.setTextColor(SSD1306_WHITE);
+  disp.setTextSize(1);
+
+  disp.drawBitmap(2, 2, ICON_WIFI_0, 12, 10, SSD1306_WHITE);
+  disp.setCursor(18, 4);
+  disp.print("GAGAL KONEK!");
+  disp.drawFastHLine(0, 15, 128, SSD1306_WHITE);
+
+  disp.drawCircle(16, 32, 9, SSD1306_WHITE);
+  disp.drawLine(12, 28, 20, 36, SSD1306_WHITE);
+  disp.drawLine(20, 28, 12, 36, SSD1306_WHITE);
+
+  String targetSsid = pendingWifiSsid.length() > 0 ? pendingWifiSsid : state.wifiSsid;
+  disp.setCursor(30, 24);
+  disp.print(truncateText(targetSsid, 16));
+  disp.setCursor(30, 35);
+  disp.print("Gagal tersambung");
+  disp.setCursor(4, 50);
+  disp.print("Cek sandi / 2.4GHz");
+
+  disp.display();
+}
+
 void updateOledDisplay() {
   if (!state.oledAvailable && !state.oled2Available) return;
+
+  if (wifiUiPhase != WIFI_UI_NORMAL) {
+    wifiAnimFrame++;
+  }
+
+  auto renderActiveWifiScreen = [&](Adafruit_SSD1306& disp) {
+    if (wifiUiPhase == WIFI_UI_PORTAL) {
+      tampilOLEDWifiPortal(disp);
+    } else if (wifiUiPhase == WIFI_UI_CONNECTING) {
+      tampilOLEDWifiConnecting(disp);
+    } else if (wifiUiPhase == WIFI_UI_CONNECTED_ANIM) {
+      tampilOLEDWifiConnected(disp);
+    } else if (wifiUiPhase == WIFI_UI_FAILED_ANIM) {
+      tampilOLEDWifiFailed(disp);
+    } else {
+      tampilOLED2(disp);
+    }
+  };
 
   // Jika kedua OLED terpasang (OLED-1 di GPIO 21/22 & OLED-2 di GPIO 16/17):
   if (state.oledAvailable && state.oled2Available) {
     tampilOLED1(oled);
-    tampilOLED2(oled2);
+    if (wifiUiPhase == WIFI_UI_NORMAL) {
+      tampilOLED2(oled2);
+    } else {
+      renderActiveWifiScreen(oled2);
+    }
     return;
   }
 
-  // Jika hanya 1 OLED yang sedang dicolok, bergantian tampilkan OLED 1 & OLED 2 tiap 5 detik
+  // Jika hanya 1 OLED terpasang:
   Adafruit_SSD1306& activeDisp = state.oledAvailable ? oled : oled2;
+  if (wifiUiPhase == WIFI_UI_CONNECTING ||
+      wifiUiPhase == WIFI_UI_CONNECTED_ANIM ||
+      wifiUiPhase == WIFI_UI_FAILED_ANIM) {
+    renderActiveWifiScreen(activeDisp);
+    return;
+  }
+
   if (((millis() / 5000UL) % 2UL) == 0UL) {
     tampilOLED1(activeDisp);
+  } else if (wifiUiPhase == WIFI_UI_PORTAL) {
+    tampilOLEDWifiPortal(activeDisp);
   } else {
     tampilOLED2(activeDisp);
   }
@@ -953,10 +1313,13 @@ void updateOledDisplay() {
 // 13. SIKLUS INKUBASI 21 HARI & PEMBACAAN SENSOR SHT30 (0x44)
 // ============================================================================
 void updateIncubationCycle() {
-  if (state.incubationStatus != "running") {
-    if (state.motorRunning) {
-      stopTurningCycle(false);
+  if (state.motorRunning) {
+    if (millis() - state.motorTurnStartMs >= (unsigned long)state.motorDurationSeconds * 1000UL) {
+      stopTurningCycle(true);
     }
+  }
+
+  if (state.incubationStatus != "running") {
     if (state.incubationStatus == "idle") {
       state.currentDay       = 0;
       state.stage            = "";
@@ -975,6 +1338,7 @@ void updateIncubationCycle() {
   if (now >= state.finishAtEpoch && state.finishAtEpoch > 0) {
     state.incubationStatus = "finished";
     state.currentDay       = INCUBATION_TOTAL_DAYS;
+    if (state.stage != "lockdown") state.ventForceEvalImmediate = true;
     state.stage            = "lockdown";
     state.nextTurningEpoch = 0;
     if (state.motorRunning) stopTurningCycle(false);
@@ -988,16 +1352,13 @@ void updateIncubationCycle() {
   state.currentDay    = constrain(calculatedDay, 1, INCUBATION_TOTAL_DAYS);
 
   if (state.currentDay >= INCUBATION_LOCKDOWN_START) {
+    if (state.stage != "lockdown") state.ventForceEvalImmediate = true;
     state.stage            = "lockdown";
     state.nextTurningEpoch = 0;
     if (state.motorRunning) stopTurningCycle(false);
     state.turningStatus = "lockdown";
   } else {
     state.stage = "turning";
-    if (state.motorRunning &&
-        (millis() - state.motorTurnStartMs >= (unsigned long)state.motorDurationSeconds * 1000UL)) {
-      stopTurningCycle(true);
-    }
     if (!state.motorRunning) {
       state.turningStatus = "idle";
       if (state.nextTurningEpoch <= 0) {
@@ -1019,8 +1380,25 @@ void readSensorData() {
     float h = sht30.readHumidity();
 
     if (!isnan(t) && !isnan(h)) {
-      state.temperature      = roundf(t * 10.0f) / 10.0f;
-      state.humidity         = roundf(h);
+      if (!state.sensorFilterSeeded) {
+        state.filteredTemperature = t;
+        state.filteredHumidity    = h;
+        for (int i = 0; i < TEMP_TREND_SAMPLES; i++) {
+          state.tempHistory[i] = t;
+        }
+        state.tempHistCount      = TEMP_TREND_SAMPLES;
+        state.tempHistIdx        = 0;
+        state.sensorFilterSeeded = true;
+      } else {
+        state.filteredTemperature += TEMP_EMA_ALPHA * (t - state.filteredTemperature);
+        state.filteredHumidity    += HUM_EMA_ALPHA  * (h - state.filteredHumidity);
+        state.tempHistory[state.tempHistIdx] = state.filteredTemperature;
+        state.tempHistIdx = (state.tempHistIdx + 1) % TEMP_TREND_SAMPLES;
+        if (state.tempHistCount < TEMP_TREND_SAMPLES) state.tempHistCount++;
+      }
+
+      state.temperature      = roundf(state.filteredTemperature * 10.0f) / 10.0f;
+      state.humidity         = roundf(state.filteredHumidity);
       state.sensorFailStreak = 0;
       state.sensorError      = false;
     } else {
@@ -1031,9 +1409,25 @@ void readSensorData() {
     }
   } else {
     if (sht30.begin(I2C_ADDR_SHT30)) {
-      state.sht30Available   = true;
-      state.sensorFailStreak = 0;
-      state.sensorError      = false;
+      state.sht30Available     = true;
+      state.sensorFilterSeeded = false;
+      float t = sht30.readTemperature();
+      float h = sht30.readHumidity();
+      if (!isnan(t) && !isnan(h)) {
+        state.filteredTemperature = t;
+        state.filteredHumidity    = h;
+        for (int i = 0; i < TEMP_TREND_SAMPLES; i++) state.tempHistory[i] = t;
+        state.tempHistCount      = TEMP_TREND_SAMPLES;
+        state.tempHistIdx        = 0;
+        state.sensorFilterSeeded = true;
+        state.temperature        = roundf(t * 10.0f) / 10.0f;
+        state.humidity           = roundf(h);
+        state.sensorFailStreak   = 0;
+        state.sensorError        = false;
+      } else {
+        state.sensorFailStreak++;
+        if (state.sensorFailStreak >= 3) state.sensorError = true;
+      }
     } else {
       state.sensorFailStreak++;
       if (state.sensorFailStreak >= 3) {
@@ -1044,18 +1438,425 @@ void readSensorData() {
 }
 
 // ============================================================================
-// 14. GANTI WI-FI ANTI-PUTUS (TIMEOUT 30 DETIK -> AUTO ROLLBACK)
+// 14. GANTI WI-FI ANTI-PUTUS & HOTSPOT CAPTIVE PORTAL (192.168.4.1)
 // ============================================================================
+void beepWifiConnected() {
+  bool isTempAlarm = (state.temperature > TEMP_SAFE_MAX || state.temperature < TEMP_SAFE_MIN);
+  if (isTempAlarm || state.sensorError) return;
+
+  for (int i = 0; i < 2; i++) {
+    digitalWrite(PIN_BUZZER_SFM27, HIGH);
+    delay(70);
+    digitalWrite(PIN_BUZZER_SFM27, LOW);
+    if (i == 0) delay(60);
+  }
+}
+
+const char PORTAL_HTML[] PROGMEM =
+  "<!doctype html>\n"
+  "<html lang='id'>\n"
+  "<head>\n"
+  "<meta charset='utf-8'>\n"
+  "<meta name='viewport' content='width=device-width,initial-scale=1'>\n"
+  "<title>Setup Wi-Fi Smart Hatchery</title>\n"
+  "<style>\n"
+  "  body{margin:0;padding:16px;background:#0b0705;color:#f8f1ea;font-family:system-ui,-apple-system,sans-serif;line-height:1.45}\n"
+  "  .card{max-width:440px;margin:0 auto;background:#16100c;border:1px solid #3b2819;border-radius:16px;padding:18px}\n"
+  "  h1{margin:0 0 4px;font-size:20px;color:#f0a040}\n"
+  "  p.sub{margin:0 0 14px;font-size:13px;color:#bcab9c}\n"
+  "  label{display:block;font-size:13px;font-weight:600;margin:12px 0 4px}\n"
+  "  input{width:100%;box-sizing:border-box;padding:10px 12px;border-radius:10px;border:1px solid #573b27;background:#0e0907;color:#f8f1ea;font-size:15px}\n"
+  "  .btn{width:100%;margin-top:14px;padding:11px;border:0;border-radius:10px;background:#f08040;color:#1a0d06;font-weight:700;font-size:15px;cursor:pointer}\n"
+  "  .btn2{width:100%;margin:4px 0 10px;padding:9px;border:1px solid #573b27;border-radius:10px;background:#201610;color:#f8f1ea;font-size:14px;cursor:pointer}\n"
+  "  .list{max-height:180px;overflow-y:auto;margin-bottom:8px;border:1px solid #3b2819;border-radius:10px;display:none}\n"
+  "  .item{display:flex;justify-content:space-between;padding:9px 12px;border-bottom:1px solid #2b1d12;cursor:pointer;font-size:14px}\n"
+  "  .item:last-child{border-bottom:0}\n"
+  "  .item:hover{background:#261911}\n"
+  "  .rssi{color:#f0a040;font-size:12px}\n"
+  "  .row{display:flex;align-items:center;gap:6px;margin-top:6px;font-size:13px;color:#bcab9c}\n"
+  "  .row input{width:auto}\n"
+  "  details{margin-top:14px;border-top:1px solid #3b2819;padding-top:10px}\n"
+  "  summary{cursor:pointer;font-size:13px;color:#f0a040;font-weight:600}\n"
+  "  #status{margin-top:14px;padding:10px 12px;border-radius:10px;font-size:14px;display:none}\n"
+  "  .info{display:block!important;background:#261a10;border:1px solid #8a5629;color:#fcd34d}\n"
+  "  .ok{display:block!important;background:#0f291a;border:1px solid #2e7d4f;color:#86efac}\n"
+  "  .err{display:block!important;background:#2b1111;border:1px solid #8c2f2f;color:#fca5a5}\n"
+  "  .presets{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 8px}\n"
+  "  .pbtn{flex:1 1 auto;padding:7px 8px;border:1px solid #573b27;border-radius:8px;background:#201610;color:#f8f1ea;font-size:12px;cursor:pointer}\n"
+  "  .pbtn:hover{border-color:#f0a040;color:#f0a040}\n"
+  "</style>\n"
+  "</head>\n"
+  "<body>\n"
+  "<div class='card'>\n"
+  "  <h1>Smart Hatchery Wi-Fi</h1>\n"
+  "  <p class='sub'>Pilih jaringan Wi-Fi 2.4 GHz agar alat inkubator dapat mengirim data ke server.</p>\n"
+  "  <button type='button' class='btn2' id='scanBtn' onclick='scanWifi()'>Scan Wi-Fi Sekitar</button>\n"
+  "  <div id='netList' class='list'></div>\n"
+  "  <form id='f' onsubmit='return submitForm(event)'>\n"
+  "    <label for='ssid'>Nama Wi-Fi (SSID)</label>\n"
+  "    <input id='ssid' name='ssid' maxlength='32' required placeholder='Klik hasil scan atau ketik manual'>\n"
+  "    <label for='pass'>Kata Sandi Wi-Fi</label>\n"
+  "    <input id='pass' name='pass' type='password' maxlength='63' placeholder='Minimal 8 karakter (kosong jika terbuka)'>\n"
+  "    <div class='row'><input type='checkbox' id='show' onchange=\"pass.type=this.checked?'text':'password'\"><label for='show' style='margin:0;font-weight:400'>Tampilkan kata sandi</label></div>\n"
+  "    <details>\n"
+  "      <summary>Pengaturan Server (Opsional)</summary>\n"
+  "      <label for='burl'>URL Server Backend</label>\n"
+  "      <div id='presetBox' class='presets'></div>\n"
+  "      <input id='burl' name='backend_url' placeholder='https://.../api/device/telemetry'>\n"
+  "      <label for='akey'>Device API Key</label>\n"
+  "      <input id='akey' name='api_key' placeholder='Token rahasia alat'>\n"
+  "    </details>\n"
+  "    <button type='submit' class='btn' id='subBtn'>Simpan & Hubungkan</button>\n"
+  "  </form>\n"
+  "  <div id='status'></div>\n"
+  "</div>\n"
+  "<script>\n"
+  "const st = document.getElementById('status');\n"
+  "let pollTimer = null;\n"
+  "fetch('/config').then(r=>r.json()).then(c=>{\n"
+  "  if(c.ssid) document.getElementById('ssid').value = c.ssid;\n"
+  "  if(c.backend_url) document.getElementById('burl').value = c.backend_url;\n"
+  "  if(c.api_key) document.getElementById('akey').value = c.api_key;\n"
+  "  if(c.presets && c.presets.length){\n"
+  "    const pb = document.getElementById('presetBox');\n"
+  "    pb.innerHTML = '';\n"
+  "    c.presets.forEach(p=>{\n"
+  "      const b = document.createElement('button');\n"
+  "      b.type = 'button';\n"
+  "      b.className = 'pbtn';\n"
+  "      b.textContent = p.label;\n"
+  "      b.onclick = ()=>{ document.getElementById('burl').value = p.url; };\n"
+  "      pb.appendChild(b);\n"
+  "    });\n"
+  "  }\n"
+  "}).catch(()=>{});\n"
+  "const setSt = (cls, msg) => { st.className = cls; st.textContent = msg; };\n"
+  "const scanWifi = async () => {\n"
+  "  const btn = document.getElementById('scanBtn');\n"
+  "  const box = document.getElementById('netList');\n"
+  "  btn.disabled = true; btn.textContent = 'Memindai Wi-Fi...';\n"
+  "  try{\n"
+  "    const res = await fetch('/scan');\n"
+  "    const nets = await res.json();\n"
+  "    box.innerHTML = '';\n"
+  "    if(!nets.length){\n"
+  "      box.innerHTML = '<div class=\"item\">Tidak ada jaringan 2.4 GHz ditemukan</div>';\n"
+  "    } else {\n"
+  "      nets.forEach(n=>{\n"
+  "        const d = document.createElement('div');\n"
+  "        d.className = 'item';\n"
+  "        d.innerHTML = '<span>'+n.ssid.replace(/</g,'&lt;')+(n.open?' (Terbuka)':'')+'</span><span class=\"rssi\">'+n.rssi+' dBm</span>';\n"
+  "        d.onclick = ()=>{ document.getElementById('ssid').value = n.ssid; document.getElementById('pass').focus(); };\n"
+  "        box.appendChild(d);\n"
+  "      });\n"
+  "    }\n"
+  "    box.style.display = 'block';\n"
+  "  } catch(e){ setSt('err','Gagal memindai Wi-Fi'); }\n"
+  "  btn.disabled = false; btn.textContent = 'Scan Wi-Fi Sekitar';\n"
+  "};\n"
+  "const submitForm = async (e) => {\n"
+  "  e.preventDefault();\n"
+  "  const btn = document.getElementById('subBtn');\n"
+  "  const body = new URLSearchParams(new FormData(document.getElementById('f')));\n"
+  "  btn.disabled = true;\n"
+  "  setSt('info','Menghubungkan ke Wi-Fi... Lihat layar OLED ESP32.');\n"
+  "  try{\n"
+  "    const res = await fetch('/connect',{method:'POST',body});\n"
+  "    const d = await res.json();\n"
+  "    if(!d.ok){ setSt('err', d.message || 'Input tidak valid'); btn.disabled = false; return false; }\n"
+  "    if(pollTimer) clearInterval(pollTimer);\n"
+  "    pollTimer = setInterval(async ()=>{\n"
+  "      try{\n"
+  "        const s = await (await fetch('/status')).json();\n"
+  "        if(s.status === 'connected'){\n"
+  "          clearInterval(pollTimer);\n"
+  "          setSt('ok', s.message + ' Hotspot akan mati otomatis dalam 5 detik.');\n"
+  "          btn.disabled = false;\n"
+  "        } else if(s.status === 'failed'){\n"
+  "          clearInterval(pollTimer);\n"
+  "          setSt('err', s.message || 'Gagal terhubung. Silakan coba lagi.');\n"
+  "          btn.disabled = false;\n"
+  "        }\n"
+  "      } catch(_){}\n"
+  "    }, 1000);\n"
+  "  } catch(err){ setSt('err','Gagal mengirim pengaturan'); btn.disabled = false; }\n"
+  "  return false;\n"
+  "};\n"
+  "</script>\n"
+  "</body>\n"
+  "</html>\n";
+
+void registerPortalRoutes() {
+  if (portalRoutesRegistered) return;
+  portalRoutesRegistered = true;
+
+  portalServer.on("/", HTTP_GET, []() {
+    portalServer.sendHeader("Cache-Control", "no-store");
+    portalServer.send_P(200, "text/html", PORTAL_HTML);
+  });
+
+  portalServer.on("/config", HTTP_GET, []() {
+    JsonDocument doc;
+    doc["ssid"]        = state.wifiSsid;
+    doc["backend_url"] = state.backendUrl;
+    doc["api_key"]     = state.deviceApiKey;
+    JsonArray presets  = doc["presets"].to<JsonArray>();
+    JsonObject p1 = presets.add<JsonObject>();
+    p1["label"] = "Domain Web (Utama)";
+    p1["url"]   = BACKEND_DOMAIN_URL;
+    JsonObject p2 = presets.add<JsonObject>();
+    p2["label"] = "Jembatan Laptop";
+    p2["url"]   = BACKEND_FALLBACK_URL;
+    JsonObject p3 = presets.add<JsonObject>();
+    p3["label"] = "VPS Tailscale";
+    p3["url"]   = BACKEND_TELEMETRY_URL;
+    String out;
+    serializeJson(doc, out);
+    portalServer.send(200, "application/json", out);
+  });
+
+  portalServer.on("/scan", HTTP_GET, []() {
+    int n = WiFi.scanNetworks();
+    struct NetItem {
+      String ssid;
+      int    rssi;
+      bool   open;
+    };
+    NetItem items[12];
+    int count = 0;
+
+    for (int i = 0; i < n; i++) {
+      String s = WiFi.SSID(i);
+      if (s.isEmpty()) continue;
+      int r = WiFi.RSSI(i);
+      bool isOpen = (WiFi.encryptionType(i) == WIFI_AUTH_OPEN);
+
+      int existing = -1;
+      for (int k = 0; k < count; k++) {
+        if (items[k].ssid == s) { existing = k; break; }
+      }
+      if (existing >= 0) {
+        if (r > items[existing].rssi) {
+          items[existing].rssi = r;
+          items[existing].open = isOpen;
+        }
+      } else if (count < 12) {
+        items[count++] = { s, r, isOpen };
+      }
+    }
+    WiFi.scanDelete();
+
+    // Urutkan dari sinyal terkuat (RSSI terbesar)
+    for (int i = 0; i < count - 1; i++) {
+      for (int j = i + 1; j < count; j++) {
+        if (items[j].rssi > items[i].rssi) {
+          NetItem tmp = items[i];
+          items[i] = items[j];
+          items[j] = tmp;
+        }
+      }
+    }
+
+    JsonDocument doc;
+    JsonArray arr = doc.to<JsonArray>();
+    for (int i = 0; i < count; i++) {
+      JsonObject obj = arr.add<JsonObject>();
+      obj["ssid"] = items[i].ssid;
+      obj["rssi"] = items[i].rssi;
+      obj["open"] = items[i].open;
+    }
+    String out;
+    serializeJson(doc, out);
+    portalServer.send(200, "application/json", out);
+  });
+
+  portalServer.on("/connect", HTTP_POST, []() {
+    String ssid   = portalServer.arg("ssid");
+    String pass   = portalServer.arg("pass");
+    String bUrl   = portalServer.arg("backend_url");
+    String apiKey = portalServer.arg("api_key");
+    ssid.trim();
+    bUrl.trim();
+    apiKey.trim();
+
+    if (ssid.length() < 1 || ssid.length() > 32) {
+      portalServer.send(400, "application/json", "{\"ok\":false,\"message\":\"Nama Wi-Fi (SSID) wajib 1-32 karakter.\"}");
+      return;
+    }
+    if (pass.length() > 0 && (pass.length() < 8 || pass.length() > 63)) {
+      portalServer.send(400, "application/json", "{\"ok\":false,\"message\":\"Kata sandi Wi-Fi wajib 8-63 karakter (atau kosong jika terbuka).\"}");
+      return;
+    }
+    if (!bUrl.isEmpty() && !bUrl.startsWith("http://") && !bUrl.startsWith("https://")) {
+      portalServer.send(400, "application/json", "{\"ok\":false,\"message\":\"URL server harus diawali http:// atau https://.\"}");
+      return;
+    }
+
+    pendingWifiSsid    = ssid;
+    pendingWifiPass    = pass;
+    pendingBackendUrl  = bUrl;
+    pendingApiKey      = apiKey;
+    portalConnecting   = true;
+    portalShutdownPending = false;
+    wifiConnectStartMs = millis();
+    portalStatusText   = "connecting";
+    portalStatusMsg    = "Sedang menyambung ke '" + ssid + "'...";
+    wifiUiPhase        = WIFI_UI_CONNECTING;
+    wifiAnimStartMs    = millis();
+    wifiAnimFrame      = 0;
+
+    WiFi.disconnect(false);
+    WiFi.begin(pendingWifiSsid.c_str(), pendingWifiPass.c_str());
+
+    portalServer.send(200, "application/json", "{\"ok\":true,\"status\":\"connecting\"}");
+  });
+
+  portalServer.on("/status", HTTP_GET, []() {
+    JsonDocument doc;
+    doc["status"]  = portalStatusText;
+    doc["ssid"]    = connectedSsidDisplay;
+    doc["ip"]      = connectedIpDisplay;
+    doc["message"] = portalStatusMsg;
+    String out;
+    serializeJson(doc, out);
+    portalServer.send(200, "application/json", out);
+  });
+
+  portalServer.onNotFound([]() {
+    portalServer.sendHeader("Location", String("http://") + AP_LOCAL_IP.toString() + "/", true);
+    portalServer.send(302, "text/plain", "");
+  });
+}
+
+void startWifiPortal() {
+  if (portalActive) return;
+
+  WiFi.disconnect(false);
+  WiFi.mode(WIFI_AP_STA);
+  WiFi.softAPConfig(AP_LOCAL_IP, AP_GATEWAY_IP, AP_SUBNET_MASK);
+  WiFi.softAP(AP_HOTSPOT_SSID, AP_HOTSPOT_PASS);
+
+  portalDns.setErrorReplyCode(DNSReplyCode::NoError);
+  portalDns.start(53, "*", AP_LOCAL_IP);
+  registerPortalRoutes();
+  portalServer.begin();
+
+  portalActive          = true;
+  portalConnecting      = false;
+  portalShutdownPending = false;
+  portalStatusText      = "idle";
+  portalStatusMsg       = "";
+  wifiUiPhase           = WIFI_UI_PORTAL;
+  wifiAnimStartMs       = millis();
+
+  Serial.printf("[PORTAL] Hotspot aktif: SSID='%s' Pass='%s' IP=%s\n",
+                AP_HOTSPOT_SSID, AP_HOTSPOT_PASS, WiFi.softAPIP().toString().c_str());
+}
+
+void stopWifiPortal() {
+  if (!portalActive) return;
+
+  portalDns.stop();
+  portalServer.stop();
+  WiFi.softAPdisconnect(true);
+  WiFi.mode(WIFI_STA);
+
+  portalActive          = false;
+  portalShutdownPending = false;
+  Serial.println("[PORTAL] Hotspot setup dimatikan (mode WIFI_STA aktif).");
+}
+
+void handleWifiPortalAndState() {
+  netBox.pauseRequested = (portalActive || portalConnecting);
+  if (portalActive) {
+    portalDns.processNextRequest();
+    portalServer.handleClient();
+  }
+
+  if (portalConnecting) {
+    if (WiFi.status() == WL_CONNECTED) {
+      state.wifiSsid = pendingWifiSsid;
+      state.wifiPass = pendingWifiPass;
+      if (!pendingBackendUrl.isEmpty() &&
+          (pendingBackendUrl.startsWith("http://") || pendingBackendUrl.startsWith("https://"))) {
+        state.backendUrl = pendingBackendUrl;
+      }
+      if (!pendingApiKey.isEmpty()) {
+        state.deviceApiKey = pendingApiKey;
+      }
+      state.commAlertPending = false;
+      state.commAlertMessage = "";
+      saveSettingsToNVS();
+      configTime(0, 0, NTP_SERVER_1, NTP_SERVER_2);
+
+      connectedSsidDisplay    = state.wifiSsid;
+      connectedIpDisplay      = WiFi.localIP().toString();
+      portalConnecting        = false;
+      portalStatusText        = "connected";
+      portalStatusMsg         = "Berhasil terhubung ke '" + state.wifiSsid + "' (IP: " + connectedIpDisplay + ").";
+      wifiUiPhase             = WIFI_UI_CONNECTED_ANIM;
+      wifiAnimStartMs         = millis();
+      wifiDisconnectedSinceMs = 0;
+      portalShutdownPending   = true;
+      portalShutdownAtMs      = millis() + PORTAL_AP_SHUTDOWN_MS;
+
+      Serial.printf("[PORTAL] Terhubung ke Wi-Fi '%s' (IP: %s)\n",
+                    connectedSsidDisplay.c_str(), connectedIpDisplay.c_str());
+      beepWifiConnected();
+    } else if (millis() - wifiConnectStartMs >= PORTAL_CONNECT_WAIT_MS) {
+      WiFi.disconnect(false);
+      portalConnecting = false;
+      portalStatusText = "failed";
+      portalStatusMsg  = "Gagal tersambung ke '" + pendingWifiSsid + "' dalam 20 detik. Cek kata sandi & pastikan Wi-Fi 2.4 GHz.";
+      wifiUiPhase      = WIFI_UI_FAILED_ANIM;
+      wifiAnimStartMs  = millis();
+      Serial.printf("[PORTAL] Gagal menyambung ke '%s'\n", pendingWifiSsid.c_str());
+    }
+  }
+
+  if (portalShutdownPending && (long)(millis() - portalShutdownAtMs) >= 0) {
+    stopWifiPortal();
+  }
+
+  if (wifiUiPhase == WIFI_UI_CONNECTED_ANIM && (millis() - wifiAnimStartMs >= WIFI_ANIM_CONNECTED_MS)) {
+    wifiUiPhase = WIFI_UI_NORMAL;
+  } else if (wifiUiPhase == WIFI_UI_FAILED_ANIM && (millis() - wifiAnimStartMs >= WIFI_ANIM_FAILED_MS)) {
+    wifiUiPhase = portalActive ? WIFI_UI_PORTAL : WIFI_UI_NORMAL;
+  }
+
+  // Fallback otomatis buka hotspot bila belum ada Wi-Fi atau putus > 30 detik
+  if (!portalActive && !portalConnecting) {
+    if (WiFi.status() == WL_CONNECTED) {
+      wifiDisconnectedSinceMs = 0;
+    } else if (state.wifiSsid.isEmpty()) {
+      startWifiPortal();
+    } else {
+      if (wifiDisconnectedSinceMs == 0) {
+        wifiDisconnectedSinceMs = millis();
+      } else if (millis() - wifiDisconnectedSinceMs >= WIFI_RECONNECT_FAIL_MS) {
+        wifiDisconnectedSinceMs = 0;
+        startWifiPortal();
+      }
+    }
+  }
+}
+
 bool applyNewWifiWithRollback(const String& newSsid, const String& newPassword) {
   if (newSsid.length() < 1 || newSsid.length() > 32 ||
       newPassword.length() < 8 || newPassword.length() > 63) {
     return false;
   }
 
+  netBox.pauseRequested = true;
+  unsigned long waitNetStart = millis();
+  while (netBox.inFlight && (millis() - waitNetStart < 4500UL)) {
+    delay(25);
+  }
+
   String oldSsid = state.wifiSsid;
   String oldPass = state.wifiPass;
 
-  WiFi.disconnect(true);
+  WiFi.disconnect(false);
   delay(200);
   WiFi.mode(WIFI_STA);
   WiFi.begin(newSsid.c_str(), newPassword.c_str());
@@ -1071,12 +1872,20 @@ bool applyNewWifiWithRollback(const String& newSsid, const String& newPassword) 
     state.commAlertPending = false;
     state.commAlertMessage = "";
     saveSettingsToNVS();
+
+    connectedSsidDisplay = newSsid;
+    connectedIpDisplay   = WiFi.localIP().toString();
+    wifiUiPhase          = WIFI_UI_CONNECTED_ANIM;
+    wifiAnimStartMs      = millis();
+    beepWifiConnected();
+    netBox.pauseRequested = false;
     return true;
   }
 
   // Rollback ke Wi-Fi lama di NVS
-  WiFi.disconnect(true);
+  WiFi.disconnect(false);
   delay(200);
+  WiFi.mode(WIFI_STA);
   WiFi.begin(oldSsid.c_str(), oldPass.c_str());
 
   unsigned long rollbackStart = millis();
@@ -1088,6 +1897,7 @@ bool applyNewWifiWithRollback(const String& newSsid, const String& newPassword) 
   state.wifiPass         = oldPass;
   state.commAlertPending = true;
   state.commAlertMessage = "Gagal menyambung ke Wi-Fi '" + newSsid + "' dalam 30 detik. Perangkat rollback ke '" + oldSsid + "'.";
+  netBox.pauseRequested  = false;
   return false;
 }
 
@@ -1113,6 +1923,17 @@ void buildDeviceCondition(String& outHealth, String& outSummary) {
   if (state.commAlertPending) {
     outHealth  = "warning";
     outSummary = state.commAlertMessage;
+    return;
+  }
+
+  float humMinBound, humMaxBound;
+  getActiveHumidityBounds(humMinBound, humMaxBound);
+  String phaseName = isIncubationLockdownPhase() ? "Fase Lockdown" : "Fase Setter";
+  if (!state.sensorError && (state.humidity < humMinBound || state.humidity > humMaxBound)) {
+    outHealth = "warning";
+    outSummary = (state.humidity < humMinBound)
+      ? ("Peringatan: Kelembapan rendah " + String((int)round(state.humidity)) + "% di " + phaseName + " (min " + String((int)humMinBound) + "%).")
+      : ("Peringatan: Kelembapan tinggi " + String((int)round(state.humidity)) + "% di " + phaseName + " (maks " + String((int)humMaxBound) + "%).");
     return;
   }
 
@@ -1166,6 +1987,7 @@ void processIncomingCommand(JsonVariantConst cmdObj) {
     if (mode == "auto") {
       state.lampMode        = "auto";
       state.lampFuzzyActive = true;
+      state.lampFloatPct    = (float)state.lampIntensity;
       evaluateFuzzyControl();
       saveSettingsToNVS();
       recordCommandResult(cmdId, "lamp", "auto", true);
@@ -1177,6 +1999,7 @@ void processIncomingCommand(JsonVariantConst cmdObj) {
         state.lampMode        = "manual";
         state.lampFuzzyActive = false;
         applyLampOutput(intensity);
+        state.lampFloatPct    = (float)state.lampIntensity;
         saveSettingsToNVS();
         recordCommandResult(cmdId, "lamp", "manual", true);
       }
@@ -1187,8 +2010,9 @@ void processIncomingCommand(JsonVariantConst cmdObj) {
   else if (target == "ventilation") {
     String mode = cmdObj["mode"] | "";
     if (mode == "auto") {
-      state.ventMode        = "auto";
-      state.ventFuzzyActive = true;
+      state.ventMode               = "auto";
+      state.ventFuzzyActive        = false;
+      state.ventForceEvalImmediate = true;
       evaluateFuzzyControl();
       saveSettingsToNVS();
       recordCommandResult(cmdId, "ventilation", "auto", true);
@@ -1210,10 +2034,8 @@ void processIncomingCommand(JsonVariantConst cmdObj) {
   else if (target == "turning") {
     String action = cmdObj["action"] | "";
     if (action == "turn_now") {
-      updateIncubationCycle();
       bool canTurn = (state.incubationStatus == "running") &&
                      (state.stage == "turning") &&
-                     (state.currentDay < INCUBATION_LOCKDOWN_START) &&
                      state.encoderOk &&
                      !state.motorRunning;
       if (!canTurn) {
@@ -1266,6 +2088,7 @@ void processIncomingSettings(JsonVariantConst settingsObj) {
   }
 
   if (changed) {
+    state.ventForceEvalImmediate = true;
     saveSettingsToNVS();
     evaluateFuzzyControl();
   }
@@ -1285,6 +2108,11 @@ void processIncomingSettings(JsonVariantConst settingsObj) {
 // 17. PENGIRIMAN TELEMETRI HTTP REST TIAP 5 DETIK
 // ============================================================================
 void sendTelemetryAndPollBackend() {
+  if (portalActive || portalConnecting || state.wifiSsid.isEmpty()) {
+    state.backendConnected = false;
+    return;
+  }
+
   if (WiFi.status() != WL_CONNECTED) {
     state.backendConnected = false;
     WiFi.reconnect();
@@ -1304,15 +2132,14 @@ void sendTelemetryAndPollBackend() {
 
   JsonObject inc = doc["incubation"].to<JsonObject>();
   inc["status"]     = state.incubationStatus;
+  inc["total_days"] = INCUBATION_TOTAL_DAYS;
   if (state.incubationStatus == "idle") {
     inc["current_day"] = nullptr;
-    inc["total_days"]  = nullptr;
     inc["started_at"]  = nullptr;
     inc["finish_at"]   = nullptr;
     inc["stage"]       = nullptr;
   } else {
     inc["current_day"] = state.currentDay;
-    inc["total_days"]  = INCUBATION_TOTAL_DAYS;
     inc["started_at"]  = formatIso8601Utc(state.startedAtEpoch);
     inc["finish_at"]   = formatIso8601Utc(state.finishAtEpoch);
     inc["stage"]       = state.stage;
@@ -1393,6 +2220,19 @@ void sendTelemetryAndPollBackend() {
     a["timestamp"] = nowIso;
     a["status"]    = "active";
   }
+  float humMinBound, humMaxBound;
+  getActiveHumidityBounds(humMinBound, humMaxBound);
+  String phaseLabel = isIncubationLockdownPhase() ? "Fase Lockdown" : "Fase Setter";
+  if (!state.sensorError && (state.humidity < humMinBound || state.humidity > humMaxBound)) {
+    JsonObject a = alertsArr.add<JsonObject>();
+    a["type"]     = "humidity_warning";
+    a["severity"] = "medium";
+    a["message"]  = (state.humidity < humMinBound)
+      ? ("Kelembapan " + String((int)round(state.humidity)) + "% di bawah batas minimal " + phaseLabel + " (" + String((int)humMinBound) + "%)")
+      : ("Kelembapan " + String((int)round(state.humidity)) + "% melewati batas maksimal " + phaseLabel + " (" + String((int)humMaxBound) + "%)");
+    a["timestamp"] = nowIso;
+    a["status"]    = "active";
+  }
   if (state.commAlertPending) {
     JsonObject a = alertsArr.add<JsonObject>();
     a["type"]      = "communication";
@@ -1405,57 +2245,167 @@ void sendTelemetryAndPollBackend() {
   String payload;
   serializeJson(doc, payload);
 
-  auto postToBackend = [&](const String& url, String& outResponse) -> int {
-    HTTPClient http;
-    WiFiClientSecure secureClient;
-    if (url.startsWith("https://")) {
-      secureClient.setInsecure();
-      http.begin(secureClient, url);
-    } else {
-      http.begin(url);
-    }
-    http.setTimeout(3500);
-    http.addHeader("Content-Type", "application/json");
-    http.addHeader("X-Device-Key", DEVICE_API_KEY);
-
-    int code = http.POST(payload);
-    if (code >= 200 && code < 300) {
-      outResponse = http.getString();
-    }
-    http.end();
-    return code;
-  };
-
-  const char* candidateUrls[3] = {
-    BACKEND_TELEMETRY_URL,
+  const char* candidates[4] = {
+    state.backendUrl.c_str(),
+    BACKEND_DOMAIN_URL,
     BACKEND_FALLBACK_URL,
-    BACKEND_DOMAIN_URL
+    BACKEND_TELEMETRY_URL
   };
-  static int lastWorkingUrlIdx = 0;
-
-  String responseBody;
-  int httpCode = -1;
-  for (int attempt = 0; attempt < 3; attempt++) {
-    int idx = (lastWorkingUrlIdx + attempt) % 3;
-    if (candidateUrls[idx] == nullptr || strlen(candidateUrls[idx]) == 0) continue;
-
-    httpCode = postToBackend(String(candidateUrls[idx]), responseBody);
-    if (httpCode >= 200 && httpCode < 300) {
-      lastWorkingUrlIdx = idx;
-      break;
+  String uniqueUrls[4];
+  int urlCount = 0;
+  for (int i = 0; i < 4; i++) {
+    String u = String(candidates[i]);
+    u.trim();
+    if (u.isEmpty() || (!u.startsWith("http://") && !u.startsWith("https://"))) continue;
+    bool dup = false;
+    for (int j = 0; j < urlCount; j++) {
+      if (uniqueUrls[j] == u) { dup = true; break; }
     }
-    Serial.printf("[HTTP] URL [%d] %s gagal (HTTP %d), mencoba URL cadangan berikutnya...\n",
-                  idx, candidateUrls[idx], httpCode);
+    if (!dup) uniqueUrls[urlCount++] = u;
   }
 
+  if (netBox.mutex != NULL && urlCount > 0) {
+    if (xSemaphoreTake(netBox.mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+      if (!netBox.inFlight && !netBox.jobPending) {
+        netBox.payload  = payload;
+        netBox.urlCount = urlCount;
+        for (int i = 0; i < urlCount; i++) netBox.urls[i] = uniqueUrls[i];
+        netBox.apiKey     = state.deviceApiKey;
+        netBox.jobPending = true;
+      }
+      xSemaphoreGive(netBox.mutex);
+    }
+  }
+}
+
+void telemetryNetworkTask(void* pvParameters) {
+  (void)pvParameters;
+  int consecutiveFailRounds = 0;
+  unsigned long nextFullRetryMs = 0;
+
+  for (;;) {
+    if (netBox.pauseRequested || netBox.mutex == NULL) {
+      vTaskDelay(pdMS_TO_TICKS(80));
+      continue;
+    }
+
+    String localPayload;
+    String localUrls[4];
+    int    localUrlCount = 0;
+    String localApiKey;
+    bool   hasJob = false;
+
+    if (xSemaphoreTake(netBox.mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+      if (netBox.jobPending) {
+        localPayload     = netBox.payload;
+        localUrlCount    = netBox.urlCount;
+        for (int i = 0; i < localUrlCount && i < 4; i++) localUrls[i] = netBox.urls[i];
+        localApiKey       = netBox.apiKey;
+        netBox.jobPending = false;
+        netBox.inFlight   = true;
+        hasJob            = true;
+      }
+      xSemaphoreGive(netBox.mutex);
+    }
+
+    if (!hasJob) {
+      vTaskDelay(pdMS_TO_TICKS(50));
+      continue;
+    }
+
+    int triesAllowed = localUrlCount;
+    if (consecutiveFailRounds >= 2 && (long)(millis() - nextFullRetryMs) < 0) {
+      triesAllowed = 1; // Hindari menumpuk fallback saat internet putus; coba URL utama saja sampai backoff selesai
+    }
+
+    String responseBody;
+    int httpCode = -1;
+    for (int i = 0; i < triesAllowed; i++) {
+      if (netBox.pauseRequested || WiFi.status() != WL_CONNECTED) break;
+
+      uint16_t timeoutMs = localUrls[i].startsWith("https://") ? 5000 : (i == 0 ? 3000 : 1800);
+      if (i > 0) {
+        Serial.printf("[HTTP] URL sebelumnya gagal (HTTP %d), mencoba cadangan #%d (%s)...\n",
+                      httpCode, i, localUrls[i].c_str());
+      }
+
+      HTTPClient http;
+      WiFiClientSecure secureClient;
+      if (localUrls[i].startsWith("https://")) {
+        secureClient.setInsecure();
+        http.begin(secureClient, localUrls[i]);
+      } else {
+        http.begin(localUrls[i]);
+      }
+      http.setTimeout(timeoutMs);
+      http.addHeader("Content-Type", "application/json");
+      http.addHeader("X-Device-Key", localApiKey);
+
+      httpCode = http.POST(localPayload);
+      if (httpCode >= 200 && httpCode < 300) {
+        responseBody = http.getString();
+      }
+      http.end();
+
+      if (httpCode >= 200 && httpCode < 300) {
+        if (i > 0) {
+          Serial.printf("[HTTP] Berhasil lewat URL cadangan (%s)\n", localUrls[i].c_str());
+        }
+        break;
+      }
+    }
+
+    bool ok = (httpCode >= 200 && httpCode < 300);
+    if (ok) {
+      consecutiveFailRounds = 0;
+    } else {
+      consecutiveFailRounds++;
+      if (consecutiveFailRounds >= 2) {
+        nextFullRetryMs = millis() + NET_FAILURE_BACKOFF_MS;
+      }
+    }
+
+    if (xSemaphoreTake(netBox.mutex, portMAX_DELAY) == pdTRUE) {
+      netBox.inFlight        = false;
+      netBox.resultConnected = ok;
+      netBox.resultBody      = responseBody;
+      netBox.resultHttpCode  = httpCode;
+      netBox.resultReady     = true;
+      xSemaphoreGive(netBox.mutex);
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(50));
+  }
+}
+
+void applyPendingNetworkResult() {
+  if (netBox.mutex == NULL) return;
+  bool hasResult = false;
+  bool ok = false;
+  String body;
+  int httpCode = -1;
+
+  if (xSemaphoreTake(netBox.mutex, pdMS_TO_TICKS(5)) == pdTRUE) {
+    if (netBox.resultReady) {
+      hasResult          = true;
+      ok                 = netBox.resultConnected;
+      body               = netBox.resultBody;
+      httpCode           = netBox.resultHttpCode;
+      netBox.resultReady = false;
+      netBox.resultBody  = "";
+    }
+    xSemaphoreGive(netBox.mutex);
+  }
+  if (!hasResult) return;
+
   state.backendChecked = true;
-  if (httpCode >= 200 && httpCode < 300) {
+  if (ok) {
     state.backendConnected = true;
     if (state.commAlertPending) state.commAlertPending = false;
 
-    if (responseBody.length() > 2) {
+    if (body.length() > 2) {
       JsonDocument respDoc;
-      if (!deserializeJson(respDoc, responseBody)) {
+      if (!deserializeJson(respDoc, body)) {
         if (!respDoc["pending_command"].isNull()) {
           processIncomingCommand(respDoc["pending_command"]);
         } else if (!respDoc["command"].isNull()) {
@@ -1537,51 +2487,99 @@ void setup() {
   initRobotDynDimmer();
   applyLampOutput(state.lampIntensity);
 
-  // 5. Koneksi Wi-Fi & Sinkronisasi NTP
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(state.wifiSsid.c_str(), state.wifiPass.c_str());
-
-  unsigned long startWifi = millis();
-  while (WiFi.status() != WL_CONNECTED && (millis() - startWifi < 10000UL)) {
-    delay(250);
-  }
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.printf("[WIFI] Terhubung ke %s (IP: %s)\n",
-                  state.wifiSsid.c_str(), WiFi.localIP().toString().c_str());
-    configTime(0, 0, NTP_SERVER_1, NTP_SERVER_2);
-  } else {
-    Serial.println("[WIFI] Belum terhubung, berjalan mode lokal + RTC/Fuzzy.");
-  }
-
+  // 5. Baca sensor, perbarui siklus 21 hari, & hitung kontrol awal sebelum Wi-Fi
   pollPhysicalSwitches();
   readSensorData();
-  evaluateFuzzyControl();
   updateIncubationCycle();
+  evaluateFuzzyControl();
+
+  // 6. Koneksi Wi-Fi (atau langsung nyalakan Hotspot Setup jika NVS belum punya Wi-Fi / gagal konek)
+  if (!state.wifiSsid.isEmpty()) {
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(state.wifiSsid.c_str(), state.wifiPass.c_str());
+
+    wifiUiPhase     = WIFI_UI_CONNECTING;
+    wifiAnimStartMs = millis();
+    updateOledDisplay();
+
+    unsigned long startWifi    = millis();
+    unsigned long lastBootAnim = millis();
+    while (WiFi.status() != WL_CONNECTED && (millis() - startWifi < BOOT_WIFI_TIMEOUT_MS)) {
+      pollPhysicalSwitches();
+      updateBuzzerAlarm();
+      if (millis() - lastBootAnim >= OLED_ANIM_INTERVAL_MS) {
+        lastBootAnim = millis();
+        updateOledDisplay();
+      }
+      delay(50);
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+      connectedSsidDisplay = state.wifiSsid;
+      connectedIpDisplay   = WiFi.localIP().toString();
+      Serial.printf("[WIFI] Terhubung ke %s (IP: %s)\n",
+                    connectedSsidDisplay.c_str(), connectedIpDisplay.c_str());
+      configTime(0, 0, NTP_SERVER_1, NTP_SERVER_2);
+
+      wifiUiPhase     = WIFI_UI_CONNECTED_ANIM;
+      wifiAnimStartMs = millis();
+      beepWifiConnected();
+    } else {
+      Serial.println("[WIFI] Gagal tersambung ke Wi-Fi tersimpan, membuka Hotspot Setup...");
+      WiFi.disconnect(false);
+      startWifiPortal();
+    }
+  } else {
+    Serial.println("[WIFI] Belum ada Wi-Fi di NVS, membuka Hotspot Setup...");
+    startWifiPortal();
+  }
+
   updateOledDisplay();
+
+  // 7. Jalankan task jaringan HTTP/HTTPS di Core 0 agar loop kendali suhu 2s di Core 1 tidak terblokir
+  netBox.mutex = xSemaphoreCreateMutex();
+  if (netBox.mutex != NULL) {
+    xTaskCreatePinnedToCore(
+      telemetryNetworkTask,
+      "TelemetryNet",
+      10240,
+      NULL,
+      1,
+      &netTaskHandle,
+      0
+    );
+  }
 }
 
 void loop() {
   unsigned long nowMs = millis();
 
-  // 1. Cek Push Button Start (GPIO 26) & Buzzer (GPIO 19)
+  // 1. Layani Hotspot Captive Portal, transisi Wi-Fi, & animasi state
+  handleWifiPortalAndState();
+
+  // 2. Cek Push Button Start (GPIO 26) & Buzzer (GPIO 19)
   pollPhysicalSwitches();
   updateBuzzerAlarm();
 
-  // 2. Refresh tampilan OLED 0.96" tiap 1 detik
-  if (nowMs - lastOledMillis >= OLED_UPDATE_INTERVAL_MS) {
+  // 3. Terapkan respons perintah/setting dari Backend bila Core 0 sudah selesai mengirim
+  applyPendingNetworkResult();
+
+  // 4. Refresh tampilan OLED (250 ms saat animasi/portal, 1 detik saat normal)
+  unsigned long oledInterval = (wifiUiPhase != WIFI_UI_NORMAL) ? OLED_ANIM_INTERVAL_MS : OLED_UPDATE_INTERVAL_MS;
+  if (nowMs - lastOledMillis >= oledInterval) {
     lastOledMillis = nowMs;
     updateOledDisplay();
   }
 
-  // 3. Baca Sensor SHT30, Hitung Logika Fuzzy, & Evaluasi Siklus 21 Hari tiap 2 detik
+  // 5. Baca Sensor SHT30, Perbarui Siklus 21 Hari, & Jalankan Kendali Smooth Dimmer + 4-Mode Servo tiap 2 detik
   if (nowMs - lastSensorMillis >= SENSOR_READ_INTERVAL_MS) {
     lastSensorMillis = nowMs;
     readSensorData();
-    evaluateFuzzyControl();
     updateIncubationCycle();
+    evaluateFuzzyControl();
   }
 
-  // 4. Kirim Telemetri JSON & Tarik Perintah/Pengaturan dari Backend tiap 5 detik
+  // 6. Antrekan pengiriman Telemetri JSON & polling Backend ke Core 0 tiap 5 detik
   if (nowMs - lastTelemetryMillis >= TELEMETRY_INTERVAL_MS) {
     lastTelemetryMillis = nowMs;
     sendTelemetryAndPollBackend();

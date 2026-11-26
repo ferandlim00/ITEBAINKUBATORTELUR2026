@@ -80,7 +80,7 @@ export async function getTelemetry() {
     const umurDetik = mockScenario.value === 'stale' ? 60 * 12 : 3;
     const hasil = { ...dasar, updated_at: new Date(Date.now() - umurDetik * 1000).toISOString() };
     if (mockOverride.lamp) hasil.lamp = { ...hasil.lamp, ...mockOverride.lamp, fuzzy_active: mockOverride.lamp.mode === 'auto' };
-    if (mockOverride.ventilation) hasil.ventilation = { ...hasil.ventilation, ...mockOverride.ventilation, fuzzy_active: mockOverride.ventilation.mode === 'auto' };
+    if (mockOverride.ventilation) hasil.ventilation = { ...hasil.ventilation, ...mockOverride.ventilation, fuzzy_active: false };
     if (mockOverride.incubation) hasil.incubation = { ...hasil.incubation, ...mockOverride.incubation };
     if (mockOverride.turn) {
       hasil.turning = { ...hasil.turning, status: 'turning' };
@@ -127,7 +127,18 @@ export async function getAuditLogs({ from, to, event, page = 1, limit = 50 } = {
 
 // Ambang peringatan dibaca saja (ditetapkan pemilik data perangkat, bukan lewat UI)
 export async function getThresholds() {
-  if (USE_MOCK) { await tunggu(150); return { temp_min: 36.5, temp_max: 38.5, hum_min: 45, hum_max: 70, stale_seconds: 15 }; }
+  if (USE_MOCK) {
+    await tunggu(150);
+    return {
+      temp_min: 36.5,
+      temp_max: 38.5,
+      hum_min: 45,
+      hum_max: 70,
+      lockdown_hum_min: 60,
+      lockdown_hum_max: 78,
+      stale_seconds: 15
+    };
+  }
   return request('/settings/thresholds');
 }
 
@@ -213,6 +224,37 @@ export async function saveMotorSettings(data) {
 export async function saveWifi({ ssid, password }) {
   if (USE_MOCK) { await tunggu(800); mockSettings.wifi.ssid = ssid; return { status: 'sent' }; }
   return request('/settings/wifi', { method: 'PUT', body: JSON.stringify({ ssid, password }) });
+}
+
+const mockNotificationSettings = {
+  telegram_enabled: true,
+  telegram_configured: false,
+  over_temperature: true,
+  low_temperature: true,
+  sensor_error: true,
+  humidity_warning: true,
+  communication: true,
+  motor_fault: true,
+  general: true
+};
+
+export async function getNotificationSettings() {
+  if (USE_MOCK) { await tunggu(150); return { ...mockNotificationSettings }; }
+  return request('/settings/notifications');
+}
+
+export async function saveNotificationSettings(patch) {
+  if (USE_MOCK) { await tunggu(200); Object.assign(mockNotificationSettings, patch); return { ...mockNotificationSettings }; }
+  return request('/settings/notifications', { method: 'PUT', body: JSON.stringify(patch) });
+}
+
+export async function testTelegramNotification() {
+  if (USE_MOCK) {
+    await tunggu(300);
+    if (!mockNotificationSettings.telegram_configured) throw new Error('Mode mock: token Bot Telegram belum diisi di server.');
+    return { status: 'ok', message: 'Simulasi: pesan uji berhasil dikirim ke Telegram.' };
+  }
+  return request('/settings/notifications/test-telegram', { method: 'POST' });
 }
 
 // ---------- Riwayat data sensor untuk grafik ----------

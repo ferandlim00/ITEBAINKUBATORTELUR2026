@@ -10,6 +10,7 @@ import (
 	"backend/internal/database"
 	"backend/internal/middleware"
 	"backend/internal/models"
+	"backend/internal/services"
 
 	"github.com/gofiber/fiber/v3"
 )
@@ -18,11 +19,12 @@ import (
 type SettingsHandler struct {
 	db  *sql.DB
 	cfg *config.Config
+	tg  *services.TelegramNotifier
 }
 
 // NewSettingsHandler creates a new SettingsHandler.
-func NewSettingsHandler(db *sql.DB, cfg *config.Config) *SettingsHandler {
-	return &SettingsHandler{db: db, cfg: cfg}
+func NewSettingsHandler(db *sql.DB, cfg *config.Config, tg *services.TelegramNotifier) *SettingsHandler {
+	return &SettingsHandler{db: db, cfg: cfg, tg: tg}
 }
 
 // GetDeviceSettings handles GET /api/settings/device (never exposes Wi-Fi password).
@@ -64,11 +66,13 @@ func (h *SettingsHandler) GetLimits(c fiber.Ctx) error {
 // GetThresholds handles GET /api/settings/thresholds (read-only safety bounds).
 func (h *SettingsHandler) GetThresholds(c fiber.Ctx) error {
 	return c.JSON(fiber.Map{
-		"temp_min":      36.5,
-		"temp_max":      38.5,
-		"hum_min":       45,
-		"hum_max":       70,
-		"stale_seconds": h.cfg.StaleSeconds,
+		"temp_min":         36.5,
+		"temp_max":         38.5,
+		"hum_min":          45,
+		"hum_max":          70,
+		"lockdown_hum_min": 60,
+		"lockdown_hum_max": 78,
+		"stale_seconds":    h.cfg.StaleSeconds,
 	})
 }
 
@@ -258,4 +262,162 @@ func (h *SettingsHandler) UpdateWifiSettings(c fiber.Ctx) error {
 	// Kata sandi Wi-Fi dilarang keras dicatat ke dalam audit log (PRD FUN 07 & SEC 03)
 	database.WriteAuditLog(h.db, user.Username, "config_change", "Konfigurasi Wi-Fi diubah ke SSID: "+ssid)
 	return c.JSON(fiber.Map{"status": "sent"})
+}
+
+func loadNotificationSettings(db *sql.DB, cfg *config.Config, tg *services.TelegramNotifier) models.NotificationSettings {
+	res := models.NotificationSettings{
+		TelegramEnabled:    true,
+		TelegramConfigured: tg != nil && tg.IsConfigured(),
+		OverTemperature:    true,
+		LowTemperature:     true,
+		SensorError:        true,
+		HumidityWarning:    true,
+		Communication:      true,
+		MotorFault:         true,
+		General:            true,
+	}
+
+	err := db.QueryRow(
+		`SELECT telegram_enabled, over_temperature, low_temperature, sensor_error,
+		        humidity_warning, communication, motor_fault, general
+		 FROM notification_settings WHERE device_id = ? LIMIT 1`,
+		cfg.DeviceID,
+	).Scan(
+		&res.TelegramEnabled,
+		&res.OverTemperature,
+		&res.LowTemperature,
+		&res.SensorError,
+		&res.HumidityWarning,
+		&res.Communication,
+		&res.MotorFault,
+		&res.General,
+	)
+	if err == sql.ErrNoRows {
+		_, _ = db.Exec("INSERT IGNORE INTO notification_settings (device_id) VALUES (?)", cfg.DeviceID)
+	}
+	return res
+}
+
+// GetNotificationSettings handles GET /api/settings/notifications (works even when ESP32 is offline).
+func (h *SettingsHandler) GetNotificationSettings(c fiber.Ctx) error {
+	return c.JSON(loadNotificationSettings(h.db, h.cfg, h.tg))
+}
+
+// UpdateNotificationSettings handles PUT /api/settings/notifications (supports partial toggles).
+func (h *SettingsHandler) UpdateNotificationSettings(c fiber.Ctx) error {
+	user := middleware.CurrentUser(c)
+
+	var body struct {
+		TelegramEnabled *bool `json:"telegram_enabled"`
+		OverTemperature *bool `json:"over_temperature"`
+		LowTemperature  *bool `json:"low_temperature"`
+		SensorError     *bool `json:"sensor_error"`
+		HumidityWarning *bool `json:"humidity_warning"`
+		Communication   *bool `json:"communication"`
+		MotorFault      *bool `json:"motor_fault"`
+		General         *bool `json:"general"`
+	}
+	if err := c.Bind().JSON(&body); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"message": "Format pengaturan notifikasi tidak valid.",
+		})
+	}
+
+	if body.TelegramEnabled == nil && body.OverTemperature == nil && body.LowTemperature == nil &&
+		body.SensorError == nil && body.HumidityWarning == nil && body.Communication == nil &&
+		body.MotorFault == nil && body.General == nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"message": "Minimal satu saklar notifikasi harus disertakan.",
+		})
+	}
+
+	current := loadNotificationSettings(h.db, h.cfg, h.tg)
+	changed := make([]string, 0, 8)
+	apply := func(name string, ptr *bool, target *bool) {
+		if ptr != nil && *ptr != *target {
+			*target = *ptr
+			stateStr := "nonaktif"
+			if *ptr {
+				stateStr = "aktif"
+			}
+			changed = append(changed, name+"="+stateStr)
+		}
+	}
+
+	apply("telegram", body.TelegramEnabled, &current.TelegramEnabled)
+	apply("over_temperature", body.OverTemperature, &current.OverTemperature)
+	apply("low_temperature", body.LowTemperature, &current.LowTemperature)
+	apply("sensor_error", body.SensorError, &current.SensorError)
+	apply("humidity_warning", body.HumidityWarning, &current.HumidityWarning)
+	apply("communication", body.Communication, &current.Communication)
+	apply("motor_fault", body.MotorFault, &current.MotorFault)
+	apply("general", body.General, &current.General)
+
+	if _, err := h.db.Exec(
+		`INSERT INTO notification_settings (
+			device_id, telegram_enabled, over_temperature, low_temperature, sensor_error,
+			humidity_warning, communication, motor_fault, general, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())
+		ON DUPLICATE KEY UPDATE
+			telegram_enabled = VALUES(telegram_enabled),
+			over_temperature = VALUES(over_temperature),
+			low_temperature = VALUES(low_temperature),
+			sensor_error = VALUES(sensor_error),
+			humidity_warning = VALUES(humidity_warning),
+			communication = VALUES(communication),
+			motor_fault = VALUES(motor_fault),
+			general = VALUES(general),
+			updated_at = UTC_TIMESTAMP()`,
+		h.cfg.DeviceID,
+		current.TelegramEnabled, current.OverTemperature, current.LowTemperature, current.SensorError,
+		current.HumidityWarning, current.Communication, current.MotorFault, current.General,
+	); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"message": "Gagal menyimpan pengaturan notifikasi.",
+		})
+	}
+
+	if len(changed) > 0 {
+		database.WriteAuditLog(h.db, user.Username, "config_change",
+			"Pengaturan notifikasi diperbarui: "+strings.Join(changed, ", "))
+	}
+	return c.JSON(current)
+}
+
+// TestTelegramNotification handles POST /api/settings/notifications/test-telegram.
+func (h *SettingsHandler) TestTelegramNotification(c fiber.Ctx) error {
+	user := middleware.CurrentUser(c)
+	if h.tg == nil || !h.tg.IsConfigured() {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"message": "Token atau Chat ID Telegram belum diisi di file .env server.",
+		})
+	}
+	if err := h.tg.SendTest(user.Username); err != nil {
+		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{
+			"message": err.Error(),
+		})
+	}
+	return c.JSON(fiber.Map{
+		"status":  "ok",
+		"message": "Pesan uji berhasil dikirim ke Telegram Bot.",
+	})
+}
+
+// TestFCMNotification handles POST /api/settings/notifications/test-fcm.
+func (h *SettingsHandler) TestFCMNotification(c fiber.Ctx) error {
+	user := middleware.CurrentUser(c)
+	if h.tg == nil || !h.tg.HasFCM() {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"message": "Firebase Cloud Messaging belum dikonfigurasi di server.",
+		})
+	}
+	if err := h.tg.SendTestFCM(user.Username); err != nil {
+		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{
+			"message": err.Error(),
+		})
+	}
+	return c.JSON(fiber.Map{
+		"status":  "ok",
+		"message": "Push notification uji berhasil dikirim ke Firebase Cloud Messaging.",
+	})
 }

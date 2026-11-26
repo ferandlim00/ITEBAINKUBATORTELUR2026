@@ -31,8 +31,10 @@ type Config struct {
 	OperatorUsername string
 	OperatorPassword string
 
-	TelegramBotToken string
-	TelegramChatID   string
+	TelegramBotToken        string
+	TelegramChatID          string
+	FirebaseCredentialsFile string
+	FCMTopic                string
 
 	StaleSeconds int
 }
@@ -71,8 +73,10 @@ func Load() (*Config, error) {
 		OperatorUsername: getEnv("OPERATOR_USERNAME", "operator1"),
 		OperatorPassword: getEnv("OPERATOR_PASSWORD", "operator12345"),
 
-		TelegramBotToken: strings.TrimSpace(os.Getenv("TELEGRAM_BOT_TOKEN")),
-		TelegramChatID:   strings.TrimSpace(os.Getenv("TELEGRAM_CHAT_ID")),
+		TelegramBotToken:        strings.TrimSpace(os.Getenv("TELEGRAM_BOT_TOKEN")),
+		TelegramChatID:          strings.TrimSpace(os.Getenv("TELEGRAM_CHAT_ID")),
+		FirebaseCredentialsFile: getEnv("FIREBASE_CREDENTIALS_FILE", "./firebase-service-account.json"),
+		FCMTopic:                getEnv("FCM_TOPIC", "incubator_alerts"),
 
 		StaleSeconds: stale,
 	}, nil

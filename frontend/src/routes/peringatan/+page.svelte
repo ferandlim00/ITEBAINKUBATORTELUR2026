@@ -7,8 +7,9 @@
   const jenis = {
     over_temperature: 'Suhu terlalu tinggi',
     low_temperature: 'Suhu terlalu rendah',
+    sensor_error: 'Sensor SHT30/SHT31 gagal baca',
+    humidity_warning: 'Kelembapan di luar batas',
     motor_fault: 'Motor gangguan',
-    sensor_error: 'Sensor error',
     communication: 'Komunikasi terputus'
   };
   const tingkat = {

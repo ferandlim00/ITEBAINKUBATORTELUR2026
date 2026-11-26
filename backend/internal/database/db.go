@@ -122,8 +122,8 @@ func runMigrations(db *sql.DB) error {
 			lamp_intensity INT NOT NULL DEFAULT 0,
 			lamp_fuzzy_active TINYINT(1) NOT NULL DEFAULT 1,
 			vent_mode VARCHAR(16) NOT NULL DEFAULT 'auto',
-			vent_angle INT NOT NULL DEFAULT 0,
-			vent_fuzzy_active TINYINT(1) NOT NULL DEFAULT 1,
+			vent_angle INT NOT NULL DEFAULT 15,
+			vent_fuzzy_active TINYINT(1) NOT NULL DEFAULT 0,
 			motor_running TINYINT(1) NOT NULL DEFAULT 0,
 			motor_encoder_ok TINYINT(1) NOT NULL DEFAULT 1,
 			turning_status VARCHAR(16) NOT NULL DEFAULT 'idle',
@@ -184,6 +184,19 @@ func runMigrations(db *sql.DB) error {
 			INDEX idx_audit_created (created_at),
 			INDEX idx_audit_event (event, created_at)
 		) ENGINE=InnoDB`,
+
+		`CREATE TABLE IF NOT EXISTS notification_settings (
+			device_id VARCHAR(64) PRIMARY KEY,
+			telegram_enabled TINYINT(1) NOT NULL DEFAULT 1,
+			over_temperature TINYINT(1) NOT NULL DEFAULT 1,
+			low_temperature TINYINT(1) NOT NULL DEFAULT 1,
+			sensor_error TINYINT(1) NOT NULL DEFAULT 1,
+			humidity_warning TINYINT(1) NOT NULL DEFAULT 1,
+			communication TINYINT(1) NOT NULL DEFAULT 1,
+			motor_fault TINYINT(1) NOT NULL DEFAULT 1,
+			general TINYINT(1) NOT NULL DEFAULT 1,
+			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+		) ENGINE=InnoDB`,
 	}
 
 	for _, stmt := range statements {
@@ -222,6 +235,13 @@ func seedDefaults(db *sql.DB, cfg *config.Config) error {
 
 	if _, err := db.Exec(
 		`INSERT IGNORE INTO device_state (device_id, summary) VALUES (?, 'Menunggu koneksi pertama dari perangkat ESP32.')`,
+		cfg.DeviceID,
+	); err != nil {
+		return err
+	}
+
+	if _, err := db.Exec(
+		`INSERT IGNORE INTO notification_settings (device_id) VALUES (?)`,
 		cfg.DeviceID,
 	); err != nil {
 		return err
