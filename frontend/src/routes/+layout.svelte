@@ -39,16 +39,13 @@
     { href: '/riwayat', teks: 'Riwayat', ikon: 'riwayat' }
   ];
 
-  // Navigasi bawah khusus ponsel (4 menu utama + Lainnya agar jempol nyaman menjangkau)
+  // Navigasi bawah khusus ponsel: 5 menu langsung tanpa perlu tombol "Lainnya" (Grafik disembunyikan di mode ponsel)
   const menuBawah = [
     { href: '/', teks: 'Beranda', ikon: 'home' },
     { href: '/kontrol', teks: 'Kontrol', ikon: 'kontrol' },
-    { href: '/grafik', teks: 'Grafik', ikon: 'grafik' },
-    { href: '/peringatan', teks: 'Peringatan', ikon: 'bel' }
-  ];
-  const menuLainnya = [
-    { href: '/pengaturan', teks: 'Pengaturan', ket: 'Target suhu, Wi-Fi, & notifikasi', ikon: 'atur' },
-    { href: '/riwayat', teks: 'Riwayat aktivitas', ket: 'Catatan perintah & kejadian', ikon: 'riwayat' }
+    { href: '/peringatan', teks: 'Peringatan', ikon: 'bel' },
+    { href: '/pengaturan', teks: 'Atur', ikon: 'atur' },
+    { href: '/riwayat', teks: 'Riwayat', ikon: 'riwayat' }
   ];
 
   const KUNCI = 'menu_kecil';
@@ -57,11 +54,9 @@
   }
 
   let kecil = $state(bacaKecil()); // menu samping diperkecil (layar lebar)
-  let bukaLainnya = $state(false); // lembar bawah "Lainnya" terbuka (layar HP)
 
   let path = $derived(page.url.pathname);
   let diLogin = $derived(path === '/login');
-  let diLainnya = $derived(menuLainnya.some((m) => m.href === path));
   let judulHalaman = $derived(menu.find((m) => m.href === path)?.teks ?? 'Smart Hatchery');
   // Dashboard disembunyikan di balik tabir login, lalu muncul halus saat tabir bergeser keluar
   let sembunyi = $derived(trans.tampil && !trans.keluar);
@@ -87,17 +82,12 @@
   $effect(() => {
     if (auth.user) startLive(); else stopLive();
   });
-  // Lembar bawah di HP menutup sendiri setelah pindah halaman
-  $effect(() => { path; bukaLainnya = false; });
 
   async function klikKeluar() {
-    bukaLainnya = false;
     await keluar();
     goto('/login');
   }
 </script>
-
-<svelte:window onkeydown={(e) => { if (e.key === 'Escape') bukaLainnya = false; }} />
 
 
 
@@ -159,8 +149,9 @@
       </aside>
 
       <div class="min-w-0 flex-1" style="opacity: {sembunyi ? 0 : 1}; transition: opacity 0.9s ease 0.25s">
-        <!-- Bilah atas ringkas khusus ponsel (tanpa tombol hamburger, fokus identitas & status cepat) -->
-        <header class="sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-line bg-night/90 px-4 py-2.5 backdrop-blur-md md:hidden">
+        <!-- Bilah atas ringkas khusus ponsel (aman dari status bar / notch APK) -->
+        <header style="padding-top: max(0.65rem, env(safe-area-inset-top));"
+          class="sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-line bg-night/90 px-4 pb-2.5 backdrop-blur-md md:hidden">
           <a href="/" class="flex items-center gap-2.5 text-ink no-underline">
             <img src="/logo.png" alt="" class="h-7 w-6 flex-none object-contain" />
             <div class="leading-tight">
@@ -178,6 +169,10 @@
               <span class="h-2 w-2 rounded-full {live.data && !live.error ? 'bg-good' : 'bg-warn'}"></span>
               {live.data && !live.error ? 'Aktif' : 'Offline'}
             </span>
+            <button type="button" onclick={klikKeluar} aria-label="Keluar dari akun" title="Keluar"
+              class="grid h-9 w-9 place-items-center rounded-full border border-line bg-panel text-ink2 transition-colors active:bg-bad/15 active:text-bad">
+              <Ikon nama="keluar" ukuran="1.15rem" />
+            </button>
           </div>
         </header>
 
@@ -189,45 +184,11 @@
       </div>
     </div>
 
-    <!-- LEMBAR BAWAH "LAINNYA" KHUSUS PONSEL -->
-    {#if bukaLainnya}
-      <button type="button" class="fixed inset-0 z-40 bg-black/60 backdrop-blur-[2px] md:hidden" aria-label="Tutup menu lainnya" onclick={() => (bukaLainnya = false)}></button>
-      <div role="dialog" aria-modal="true" aria-label="Menu lainnya"
-        class="lembar-bawah fixed inset-x-0 bottom-0 z-50 rounded-t-3xl border-t border-line bg-panel px-4 pt-3 shadow-2xl md:hidden">
-        <div class="mx-auto mb-3 h-1.5 w-12 rounded-full bg-white/15" aria-hidden="true"></div>
-        <div class="mb-3 flex items-center justify-between px-1">
-          <p class="text-sm text-ink2">Masuk sebagai <strong class="text-ink">{auth.user.username}</strong></p>
-          <button type="button" onclick={() => (bukaLainnya = false)} class="rounded-lg px-2.5 py-1.5 text-sm font-medium text-mute hover:bg-white/5 hover:text-ink">Tutup</button>
-        </div>
-        <ul class="space-y-2">
-          {#each menuLainnya as item}
-            <li>
-              <a href={item.href} aria-current={path === item.href ? 'page' : undefined}
-                class="flex items-center gap-3.5 rounded-2xl border px-4 py-3.5 no-underline transition-colors {path === item.href ? 'border-ember/60 bg-ember/15 text-ink' : 'border-line bg-white/[0.03] text-ink active:bg-white/10'}">
-                <span class="grid h-10 w-10 flex-none place-items-center rounded-xl bg-ember/15 text-ember2">
-                  <Ikon nama={item.ikon} ukuran="1.35rem" />
-                </span>
-                <span class="min-w-0 flex-1">
-                  <span class="block font-semibold leading-tight">{item.teks}</span>
-                  <span class="block text-xs text-mute">{item.ket}</span>
-                </span>
-                <Ikon nama="kanan" class="text-mute" />
-              </a>
-            </li>
-          {/each}
-        </ul>
-        <button type="button" onclick={klikKeluar}
-          class="mt-3 flex min-h-[3rem] w-full items-center justify-center gap-2 rounded-2xl border border-bad/45 bg-bad/10 px-4 py-3 font-semibold text-bad active:scale-[0.98]">
-          <Ikon nama="keluar" ukuran="1.25rem" /> Keluar dari akun
-        </button>
-      </div>
-    {/if}
-
-    <!-- NAVBAR BAWAH KHUSUS PONSEL / APK -->
+    <!-- NAVBAR BAWAH KHUSUS PONSEL / APK (5 menu rapi langsung tanpa "Lainnya") -->
     <nav aria-label="Navigasi bawah ponsel"
       style="opacity: {sembunyi ? 0 : 1}; transition: opacity 0.6s ease 0.2s"
       class="nav-bawah fixed inset-x-0 bottom-0 z-30 border-t border-line md:hidden">
-      <ul class="grid grid-cols-5 items-stretch px-1.5 pt-1.5">
+      <ul class="grid grid-cols-5 items-stretch px-1 pt-1.5">
         {#each menuBawah as m}
           <li>
             <a href={m.href} aria-current={path === m.href ? 'page' : undefined}
@@ -242,17 +203,6 @@
             </a>
           </li>
         {/each}
-        <li>
-          <button type="button" onclick={() => (bukaLainnya = !bukaLainnya)}
-            aria-expanded={bukaLainnya}
-            data-aktif={diLainnya || bukaLainnya ? 'true' : undefined}
-            class="nav-bawah-item flex min-h-[3.35rem] w-full flex-col items-center justify-center gap-0.5 rounded-xl px-1 py-1 text-[11px] font-semibold {diLainnya || bukaLainnya ? 'text-ink' : 'text-mute'}">
-            <span class="nav-bawah-pil flex h-8 w-12 items-center justify-center rounded-full">
-              <Ikon nama="menu" ukuran="1.35rem" />
-            </span>
-            <span>Lainnya</span>
-          </button>
-        </li>
       </ul>
     </nav>
   {/if}
