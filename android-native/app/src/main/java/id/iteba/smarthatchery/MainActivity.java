@@ -68,6 +68,8 @@ public class MainActivity extends Activity {
 
     private int activeTab = 0; // 0=Beranda, 1=Kontrol, 2=Peringatan, 3=Atur, 4=Riwayat
     private String alertFilter = "semua"; // semua | active | resolved
+    private String selectedFcmSimType = "general";
+    private String selectedFcmSimLabel = "Info Umum (Tes Standar)";
 
     // Draft state for Kontrol & Pengaturan so 5s polling doesn't overwrite user typing/sliders
     private boolean kontrolInitialized = false;
@@ -1011,41 +1013,69 @@ public class MainActivity extends Activity {
 
         // 1. Kartu Tes Push Notification Native & Firebase FCM (Selalu Aktif Walau Alat Offline!)
         LinearLayout notifCard = makeCard();
-        notifCard.addView(makeCardHeader("Notifikasi Android & Firebase FCM", "AKTIF", COL_GREEN));
-        TextView nDesc = makeBodyText("Aplikasi Native ini telah terhubung ke topik Firebase 'incubator_alerts'. Notifikasi tetap berbunyi walau aplikasi ditutup.");
+        notifCard.addView(makeCardHeader("Notifikasi Android & Firebase FCM", "TERHUBUNG", COL_GREEN));
+        TextView nDesc = makeBodyText("Pilih skenario pesan uji untuk memastikan push notification dari VPS -> Firebase tampil & berbunyi di HP Anda:");
         nDesc.setPadding(0, dp(6), 0, dp(10));
         notifCard.addView(nDesc);
 
-        Button localTestBtn = makePrimaryButton("Uji Notifikasi Lokal HP", COL_CARD, COL_TEXT);
-        localTestBtn.setOnClickListener(v -> HatcheryMessagingService.showPushNotification(
-                this, "✓ Notifikasi Native Aktif", "Notifikasi lokal Smart Hatchery berfungsi dengan baik!", "uji-lokal"));
-        notifCard.addView(localTestBtn);
+        final String[][] simChoices = {
+                {"general", "Info Umum (Tes Standar)"},
+                {"over_temperature", "Simulasi Darurat: Suhu Tinggi (> 38,5°C)"},
+                {"low_temperature", "Simulasi Peringatan: Suhu Rendah (< 36,5°C)"},
+                {"motor_fault", "Simulasi Darurat: Motor Pembalik Gangguan"},
+                {"communication", "Simulasi Darurat: ESP32 Terputus / Offline"}
+        };
 
-        Button fcmTestBtn = makePrimaryButton("Kirim Uji Push dari Server VPS (Firebase FCM)", COL_GREEN, Color.parseColor("#052E16"));
+        Button pickSimBtn = makePrimaryButton("Skenario: " + selectedFcmSimLabel + "  ▾", COL_PANEL, COL_TEXT);
+        pickSimBtn.setOnClickListener(v -> {
+            String[] labels = new String[simChoices.length];
+            for (int i = 0; i < simChoices.length; i++) labels[i] = simChoices[i][1];
+            new AlertDialog.Builder(this)
+                    .setTitle("Pilih Skenario Uji Firebase (FCM)")
+                    .setItems(labels, (d, which) -> {
+                        selectedFcmSimType = simChoices[which][0];
+                        selectedFcmSimLabel = simChoices[which][1];
+                        pickSimBtn.setText("Skenario: " + selectedFcmSimLabel + "  ▾");
+                    })
+                    .show();
+        });
+        notifCard.addView(pickSimBtn);
+
         LinearLayout.LayoutParams fcmLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         fcmLp.topMargin = dp(8);
+
+        Button fcmTestBtn = makePrimaryButton("Kirim Pesan Uji Firebase (FCM)", COL_GREEN, Color.parseColor("#052E16"));
         fcmTestBtn.setLayoutParams(fcmLp);
         fcmTestBtn.setOnClickListener(v -> {
             fcmTestBtn.setEnabled(false);
             fcmTestBtn.setText("Mengirim lewat VPS -> Firebase…");
+            final String simType = selectedFcmSimType;
             executor.execute(() -> {
                 try {
-                    JSONObject r = api.postJson("/settings/notifications/test-fcm", new JSONObject());
+                    JSONObject reqBody = new JSONObject();
+                    reqBody.put("type", simType);
+                    JSONObject r = api.postJson("/settings/notifications/test-fcm", reqBody);
                     mainHandler.post(() -> {
                         fcmTestBtn.setEnabled(true);
-                        fcmTestBtn.setText("Kirim Uji Push dari Server VPS (Firebase FCM)");
+                        fcmTestBtn.setText("Kirim Pesan Uji Firebase (FCM)");
                         Toast.makeText(this, "✓ " + r.optString("message", "Push terkirim!"), Toast.LENGTH_LONG).show();
                     });
                 } catch (Exception e) {
                     mainHandler.post(() -> {
                         fcmTestBtn.setEnabled(true);
-                        fcmTestBtn.setText("Kirim Uji Push dari Server VPS (Firebase FCM)");
+                        fcmTestBtn.setText("Kirim Pesan Uji Firebase (FCM)");
                         Toast.makeText(this, "⚠ " + e.getMessage(), Toast.LENGTH_LONG).show();
                     });
                 }
             });
         });
         notifCard.addView(fcmTestBtn);
+
+        Button localTestBtn = makePrimaryButton("Uji Pop-up Notifikasi Lokal HP", COL_CARD, COL_TEXT);
+        localTestBtn.setLayoutParams(fcmLp);
+        localTestBtn.setOnClickListener(v -> HatcheryMessagingService.showPushNotification(
+                this, "✓ Notifikasi Native Aktif", "Notifikasi lokal Smart Hatchery berfungsi dengan baik!", "uji-lokal"));
+        notifCard.addView(localTestBtn);
         tabContentContainer.addView(notifCard);
 
         if (!settingsLoaded || deviceSettings == null) {
