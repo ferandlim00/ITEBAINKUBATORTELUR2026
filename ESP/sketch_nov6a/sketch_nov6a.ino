@@ -504,8 +504,17 @@ void applyLampOutput(int intensityPercent) {
 
 void applyVentilationOutput(int angleDeg) {
   int clamped = constrain(angleDeg, VENT_ANGLE_MIN, VENT_ANGLE_MAX);
+  // Pastikan servo masih ter-attach (bisa lepas jika channel LEDC gagal dialokasikan saat boot)
+  if (!mg90sServo.attached()) {
+    mg90sServo.setPeriodHertz(50);
+    int ch = mg90sServo.attach(PIN_SERVO_MG90S, 500, 2400);
+    Serial.printf("[SERVO] Re-attach GPIO %d -> %s\n", PIN_SERVO_MG90S, mg90sServo.attached() ? "OK" : "GAGAL");
+    (void)ch;
+  }
+  bool changed = (state.ventAngle != clamped);
   state.ventAngle = clamped;
   mg90sServo.write(clamped);
+  if (changed) Serial.printf("[SERVO] Ventilasi -> %d deg (mode=%s)\n", clamped, state.ventMode.c_str());
 }
 
 void startTurningCycle() {
@@ -2479,9 +2488,20 @@ void setup() {
   Serial.printf("[I2C-1] RTC    (0x68): %s\n", state.rtcAvailable ? "OK" : "TIDAK TERDETEKSI");
 
   // 3. Inisialisasi Servo MG90S (GPIO 18)
+  // Alokasikan timer LEDC secara eksplisit agar servo dapat channel PWM yang valid
+  ESP32PWM::allocateTimer(0);
+  ESP32PWM::allocateTimer(1);
+  ESP32PWM::allocateTimer(2);
+  ESP32PWM::allocateTimer(3);
   mg90sServo.setPeriodHertz(50);
   mg90sServo.attach(PIN_SERVO_MG90S, 500, 2400);
-  applyVentilationOutput(state.ventAngle);
+  Serial.printf("[SERVO] Attach GPIO %d: %s\n", PIN_SERVO_MG90S, mg90sServo.attached() ? "OK" : "GAGAL");
+  // Uji gerak singkat saat boot (0 -> 45 -> posisi tersimpan) untuk verifikasi hardware
+  int savedVentAngle = state.ventAngle;
+  mg90sServo.write(0);   delay(400);
+  mg90sServo.write(45);  delay(400);
+  state.ventAngle = -1;  // paksa log & tulis ulang
+  applyVentilationOutput(savedVentAngle);
 
   // 4. Inisialisasi RobotDyn AC Dimmer (Z-C = GPIO 34, DIM = GPIO 25)
   initRobotDynDimmer();
