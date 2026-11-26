@@ -21,12 +21,12 @@ import (
 type TelemetryHandler struct {
 	db  *sql.DB
 	cfg *config.Config
-	tg  *services.TelegramNotifier
+	fcm *services.FCMNotifier
 }
 
 // NewTelemetryHandler creates a new TelemetryHandler.
-func NewTelemetryHandler(db *sql.DB, cfg *config.Config, tg *services.TelegramNotifier) *TelemetryHandler {
-	return &TelemetryHandler{db: db, cfg: cfg, tg: tg}
+func NewTelemetryHandler(db *sql.DB, cfg *config.Config, fcm *services.FCMNotifier) *TelemetryHandler {
+	return &TelemetryHandler{db: db, cfg: cfg, fcm: fcm}
 }
 
 // GetLatest handles GET /api/telemetry/latest.
@@ -320,27 +320,27 @@ func (h *TelemetryHandler) IngestDeviceTelemetry(c fiber.Ctx) error {
 		}
 	}
 
-	notifCfg := loadNotificationSettings(h.db, h.cfg, h.tg)
+	notifCfg := loadNotificationSettings(h.db, h.cfg, h.fcm)
 	h.reconcileAlerts(deviceID, p, notifCfg)
 
-	if hasPrevState && notifCfg.General && h.tg != nil {
+	if hasPrevState && notifCfg.FCMEnabled && notifCfg.General && h.fcm != nil {
 		currStatus := defaultIfEmpty(p.Incubation.Status, "idle")
 		currStage := ""
 		if p.Incubation.Stage != nil {
 			currStage = strings.TrimSpace(*p.Incubation.Stage)
 		}
 		if prevIncStatus.String != "" && prevIncStatus.String != "running" && currStatus == "running" {
-			h.tg.DispatchAlert("general:"+deviceID+":cycle_start", "general", "info",
+			h.fcm.SendWithCooldown("general:"+deviceID+":cycle_start", "general", "info",
 				fmt.Sprintf("Siklus inkubasi 21 hari resmi dimulai (Hari ke-1, target suhu %.1f°C). Telur akan dibalik otomatis sesuai jadwal.", p.TargetTemperature),
-				1*time.Minute, notifCfg.TelegramEnabled)
+				1*time.Minute)
 		} else if currStatus == "running" && prevIncStage.String != "lockdown" && currStage == "lockdown" {
-			h.tg.DispatchAlert("general:"+deviceID+":cycle_lockdown", "general", "info",
+			h.fcm.SendWithCooldown("general:"+deviceID+":cycle_lockdown", "general", "info",
 				"Siklus memasuki Fase Lockdown (Hari 19–21). Pembalikan telur otomatis dihentikan, bukaan oksigen ventilasi dinaikkan ke 40°, dan jaga kelembapan di rentang 60%–78%.",
-				1*time.Minute, notifCfg.TelegramEnabled)
+				1*time.Minute)
 		} else if prevIncStatus.String == "running" && currStatus == "finished" {
-			h.tg.DispatchAlert("general:"+deviceID+":cycle_finished", "general", "info",
+			h.fcm.SendWithCooldown("general:"+deviceID+":cycle_finished", "general", "info",
 				"Siklus inkubasi 21 hari telah selesai! Telur memasuki masa menetas. Pantau kondisi penetasan sebelum memindahkan anakan.",
-				1*time.Minute, notifCfg.TelegramEnabled)
+				1*time.Minute)
 		}
 	}
 
@@ -417,10 +417,10 @@ func (h *TelemetryHandler) reconcileAlerts(deviceID string, p models.DeviceTelem
 		deviceID,
 	)
 	if staleErr == nil {
-		if affected, _ := resStale.RowsAffected(); affected > 0 && notifCfg.General && h.tg != nil {
-			h.tg.DispatchAlert("recovery:"+deviceID+":communication", "general", "info",
+		if affected, _ := resStale.RowsAffected(); affected > 0 && notifCfg.FCMEnabled && notifCfg.General && h.fcm != nil {
+			h.fcm.SendWithCooldown("recovery:"+deviceID+":communication", "general", "info",
 				fmt.Sprintf("Koneksi ESP32 kembali online dan mengirim data normal (Suhu %.1f°C, Kelembapan %.0f%%).", p.Temperature, p.Humidity),
-				recoveryTgCooldown, notifCfg.TelegramEnabled)
+				recoveryTgCooldown)
 		}
 	}
 
@@ -502,8 +502,8 @@ func (h *TelemetryHandler) ensureActiveAlert(deviceID, alertType, severity, mess
 		 VALUES (?, ?, ?, ?, 'active', UTC_TIMESTAMP())`,
 		deviceID, alertType, severity, message,
 	)
-	if err == nil && notifCfg.IsTypeEnabled(alertType) && h.tg != nil {
-		h.tg.DispatchAlert("alert:"+deviceID+":"+alertType, alertType, severity, message, alertTgCooldown, notifCfg.TelegramEnabled)
+	if err == nil && notifCfg.FCMEnabled && notifCfg.IsTypeEnabled(alertType) && h.fcm != nil {
+		h.fcm.SendWithCooldown("alert:"+deviceID+":"+alertType, alertType, severity, message, alertTgCooldown)
 	}
 }
 
@@ -513,9 +513,9 @@ func (h *TelemetryHandler) resolveAlertTypeAndNotify(deviceID, alertType, recove
 		 WHERE device_id = ? AND type = ? AND status = 'active'`,
 		deviceID, alertType,
 	)
-	if err == nil && recoveryMsg != "" && notifCfg.General && h.tg != nil {
+	if err == nil && recoveryMsg != "" && notifCfg.FCMEnabled && notifCfg.General && h.fcm != nil {
 		if affected, _ := res.RowsAffected(); affected > 0 {
-			h.tg.DispatchAlert("recovery:"+deviceID+":"+alertType, "general", "info", recoveryMsg, recoveryTgCooldown, notifCfg.TelegramEnabled)
+			h.fcm.SendWithCooldown("recovery:"+deviceID+":"+alertType, "general", "info", recoveryMsg, recoveryTgCooldown)
 		}
 	}
 }
@@ -670,7 +670,7 @@ func GetDeviceSnapshot(db *sql.DB, cfg *config.Config) (models.TelemetryResponse
 }
 
 // CheckStaleDevice inspects device_state periodically and opens a communication alert after sustained offline duration.
-func CheckStaleDevice(db *sql.DB, cfg *config.Config, tg *services.TelegramNotifier) {
+func CheckStaleDevice(db *sql.DB, cfg *config.Config, fcm *services.FCMNotifier) {
 	var lastTelemetry sql.NullTime
 	err := db.QueryRow("SELECT last_telemetry_at FROM device_state WHERE device_id = ? LIMIT 1", cfg.DeviceID).Scan(&lastTelemetry)
 	if err != nil || !lastTelemetry.Valid {
@@ -695,10 +695,10 @@ func CheckStaleDevice(db *sql.DB, cfg *config.Config, tg *services.TelegramNotif
 				 VALUES (?, 'communication', 'high', ?, 'active', UTC_TIMESTAMP())`,
 				cfg.DeviceID, msg,
 			)
-			if insErr == nil && tg != nil {
-				notifCfg := loadNotificationSettings(db, cfg, tg)
-				if notifCfg.Communication {
-					tg.DispatchAlert("alert:"+cfg.DeviceID+":communication", "communication", "high", msg, alertTgCooldown, notifCfg.TelegramEnabled)
+			if insErr == nil && fcm != nil {
+				notifCfg := loadNotificationSettings(db, cfg, fcm)
+				if notifCfg.FCMEnabled && notifCfg.Communication {
+					fcm.SendWithCooldown("alert:"+cfg.DeviceID+":communication", "communication", "high", msg, alertTgCooldown)
 				}
 			}
 		}

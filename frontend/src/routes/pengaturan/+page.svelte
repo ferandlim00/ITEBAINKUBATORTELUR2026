@@ -3,7 +3,7 @@
   import {
     getSettings, getLimits, getNotificationSettings,
     saveTargetTemperature, saveTargetHumidity, saveMotorSettings, saveWifi,
-    saveNotificationSettings, testTelegramNotification
+    saveNotificationSettings, testFcmNotification
   } from '$lib/api.js';
   import { live, isStale, aktifkanNotifikasi, kirimNotifikasiUji, setNotifAktif, setNotifJenis } from '$lib/live.svelte.js';
   import TargetForm from '$lib/components/TargetForm.svelte';
@@ -23,8 +23,10 @@
   let notifCfg = $state(null);
   let notifSibuk = $state(false);
   let notifStatus = $state(null);
-  let tgUjiSibuk = $state(false);
-  let tgUjiHasil = $state(null);
+  let fcmUjiSibuk = $state(false);
+  let fcmUjiHasil = $state(null);
+  let fcmUjiTipe = $state('general');
+  let browserUjiHasil = $state(null);
   let error = $state('');
 
   // Wi-Fi
@@ -94,17 +96,26 @@
     }
   }
 
-  async function kirimUjiTelegram() {
-    tgUjiSibuk = true;
-    tgUjiHasil = null;
+  async function kirimUjiFcm() {
+    fcmUjiSibuk = true;
+    fcmUjiHasil = null;
     try {
-      const r = await testTelegramNotification();
-      tgUjiHasil = { ok: true, teks: r.message ?? 'Pesan uji Telegram berhasil dikirim.' };
+      const r = await testFcmNotification(fcmUjiTipe);
+      fcmUjiHasil = { ok: true, teks: r.message ?? 'Notifikasi uji Firebase Cloud Messaging berhasil dikirim.' };
     } catch (e) {
-      tgUjiHasil = { ok: false, teks: e.message };
+      fcmUjiHasil = { ok: false, teks: e.message };
     } finally {
-      tgUjiSibuk = false;
+      fcmUjiSibuk = false;
     }
+  }
+
+  function jalankanUjiBrowser() {
+    browserUjiHasil = null;
+    kirimNotifikasiUji();
+    browserUjiHasil = {
+      ok: true,
+      teks: 'Notifikasi pop-up uji telah dipicu di browser ini (pastikan mode Jangan Ganggu / Focus Assist OS tidak aktif).'
+    };
   }
 </script>
 
@@ -172,34 +183,34 @@
     {#if wifiHasil}<p role="status" class="mt-2 text-sm {wifiHasil.ok ? 'text-good' : 'text-bad'}"><Ikon nama={wifiHasil.ok ? 'ok' : 'bahaya'} /> {wifiHasil.teks}</p>{/if}
   </section>
 
-  <!-- NOTIFIKASI SISTEM & TELEGRAM (Per Jenis + Master Switch, tetap aktif walau alat offline) -->
+  <!-- NOTIFIKASI SISTEM & FIREBASE CLOUD MESSAGING (Per Jenis + Master Switch, tetap aktif walau alat offline) -->
   <section class="kartu mt-4 p-4 md:max-w-2xl">
     <div class="flex flex-wrap items-center justify-between gap-2">
-      <h2 class="text-lg font-semibold">Notifikasi Telegram & jenis peringatan</h2>
-      {#if notifCfg.telegram_configured}
+      <h2 class="text-lg font-semibold">Notifikasi Firebase (FCM) & jenis peringatan</h2>
+      {#if notifCfg.fcm_configured}
         <span class="rounded-full border border-good/50 bg-good/10 px-3 py-0.5 text-xs font-medium text-good">
-          <Ikon nama="ok" /> Bot Telegram terhubung
+          <Ikon nama="ok" /> Firebase (FCM) terhubung
         </span>
       {:else}
         <span class="rounded-full border border-warn/50 bg-warn/10 px-3 py-0.5 text-xs font-medium text-warn">
-          <Ikon nama="jam" /> Token / Chat ID Telegram belum diisi
+          <Ikon nama="jam" /> Kredensial Firebase belum dikonfigurasi
         </span>
       {/if}
     </div>
     <p class="mt-1 text-sm text-mute">
-      Atur nyala/mati tiap jenis notifikasi untuk Telegram (dari server) maupun pop-up browser. Tetap bisa diatur meski ESP32 sedang offline.
+      Atur nyala/mati tiap jenis notifikasi untuk push notification Android (Firebase Cloud Messaging) maupun pop-up browser. Tetap bisa diatur meski ESP32 sedang offline.
     </p>
 
     <div class="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-white/[0.02] p-3">
       <div>
-        <p class="font-semibold">Kirim ke Telegram Bot</p>
-        <p class="text-sm text-mute">Saklar utama pengiriman seluruh notifikasi ke bot Telegram server.</p>
+        <p class="font-semibold">Kirim ke Firebase Cloud Messaging</p>
+        <p class="text-sm text-mute">Saklar utama pengiriman seluruh push notification ke aplikasi Android melalui server.</p>
       </div>
       <div class="flex items-center gap-3">
-        <button type="button" role="switch" aria-checked={notifCfg.telegram_enabled}
-          aria-label="Saklar utama notifikasi Telegram Bot" class="saklar"
-          disabled={notifSibuk} onclick={() => ubahSaklarNotif('telegram_enabled')}></button>
-        <span class="min-w-[4.5rem] text-sm font-semibold">{notifCfg.telegram_enabled ? 'Aktif' : 'Nonaktif'}</span>
+        <button type="button" role="switch" aria-checked={notifCfg.fcm_enabled}
+          aria-label="Saklar utama notifikasi Firebase Cloud Messaging" class="saklar"
+          disabled={notifSibuk} onclick={() => ubahSaklarNotif('fcm_enabled')}></button>
+        <span class="min-w-[4.5rem] text-sm font-semibold">{notifCfg.fcm_enabled ? 'Aktif' : 'Nonaktif'}</span>
       </div>
     </div>
 
@@ -220,27 +231,38 @@
       {/each}
     </div>
 
-    <div class="mt-3 flex flex-wrap items-center gap-3">
-      <button type="button" onclick={kirimUjiTelegram}
-        disabled={!notifCfg.telegram_configured || tgUjiSibuk}
-        class="tombol tombol-sekunder">
-        {tgUjiSibuk ? 'Mengirim uji…' : 'Kirim pesan uji Telegram'}
-      </button>
+    <div class="mt-4 rounded-xl border border-line bg-white/[0.02] p-3">
+      <p class="text-sm font-semibold">Uji Pengiriman Push Notification (Server → Firebase → HP Android)</p>
+      <p class="mt-0.5 text-xs text-mute">Pilih skenario pesan uji untuk memastikan notifikasi tampil & berbunyi di HP Android Anda (termasuk saat aplikasi ditutup).</p>
+      <div class="mt-2.5 flex flex-col gap-2 sm:flex-row sm:items-center">
+        <select bind:value={fcmUjiTipe} class="input sm:max-w-xs" aria-label="Pilih skenario uji notifikasi FCM">
+          <option value="general">Info Umum (Tes Koneksi Standar)</option>
+          <option value="over_temperature">Simulasi Darurat: Suhu Tinggi (&gt; 38,5°C)</option>
+          <option value="low_temperature">Simulasi Peringatan: Suhu Rendah (&lt; 36,5°C)</option>
+          <option value="motor_fault">Simulasi Darurat: Motor Pembalik Gangguan</option>
+          <option value="communication">Simulasi Darurat: ESP32 Terputus / Offline</option>
+        </select>
+        <button type="button" onclick={kirimUjiFcm}
+          disabled={!notifCfg.fcm_configured || fcmUjiSibuk}
+          class="tombol tombol-sekunder whitespace-nowrap">
+          {fcmUjiSibuk ? 'Mengirim uji…' : 'Kirim pesan uji Firebase (FCM)'}
+        </button>
+      </div>
       {#if notifStatus}
-        <span role="status" class="text-sm {notifStatus.ok ? 'text-good' : 'text-bad'}">
+        <p role="status" class="mt-2 text-sm {notifStatus.ok ? 'text-good' : 'text-bad'}">
           <Ikon nama={notifStatus.ok ? 'ok' : 'bahaya'} /> {notifStatus.teks}
-        </span>
+        </p>
       {/if}
     </div>
 
-    {#if tgUjiHasil}
-      <p role="status" class="mt-2 text-sm {tgUjiHasil.ok ? 'text-good' : 'text-bad'}">
-        <Ikon nama={tgUjiHasil.ok ? 'ok' : 'bahaya'} /> {tgUjiHasil.teks}
+    {#if fcmUjiHasil}
+      <p role="status" class="mt-2 text-sm {fcmUjiHasil.ok ? 'text-good' : 'text-bad'}">
+        <Ikon nama={fcmUjiHasil.ok ? 'ok' : 'bahaya'} /> {fcmUjiHasil.teks}
       </p>
     {/if}
-    {#if !notifCfg.telegram_configured}
+    {#if !notifCfg.fcm_configured}
       <p class="mt-2 text-sm text-mute">
-        Untuk mengaktifkan bot Telegram, isi <code>TELEGRAM_BOT_TOKEN</code> dan <code>TELEGRAM_CHAT_ID</code> pada file <code>.env</code> server lalu restart backend.
+        Untuk mengaktifkan push notification Firebase, letakkan file service account JSON di <code>FIREBASE_CREDENTIALS_FILE</code> (default: <code>./firebase-service-account.json</code>) lalu restart backend.
       </p>
     {/if}
   </section>
@@ -260,7 +282,10 @@
       <p class="mt-3 text-sm text-ink2">Notifikasi browser dimatikan. Peringatan tetap tampil di halaman Dashboard dan Peringatan.</p>
     {:else if live.izin === 'granted'}
       <p class="mt-3 text-sm text-good"><Ikon nama="ok" /> Notifikasi akan muncul di browser ini.</p>
-      <button type="button" onclick={kirimNotifikasiUji} class="tombol tombol-sekunder mt-2">Kirim notifikasi uji browser</button>
+      <button type="button" onclick={jalankanUjiBrowser} class="tombol tombol-sekunder mt-2">Kirim notifikasi uji browser</button>
+      {#if browserUjiHasil}
+        <p role="status" class="mt-2 text-sm text-good"><Ikon nama="ok" /> {browserUjiHasil.teks}</p>
+      {/if}
     {:else if live.izin === 'denied'}
       <p class="mt-3 text-sm text-bad"><Ikon nama="bahaya" /> Notifikasi diblokir browser. Klik ikon gembok di sebelah alamat web, lalu izinkan Notifikasi.</p>
     {:else if live.izin === 'unsupported'}

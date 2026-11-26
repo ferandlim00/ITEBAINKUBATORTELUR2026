@@ -46,8 +46,6 @@ services:
       DEVICE_API_KEY: ${DEVICE_API_KEY:-secret-device-token-esp32}
       OPERATOR_USERNAME: ${OPERATOR_USERNAME:-operator1}
       OPERATOR_PASSWORD: ${OPERATOR_PASSWORD:-operator12345}
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
-      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
       FIREBASE_CREDENTIALS_FILE: /app/firebase-service-account.json
       FCM_TOPIC: ${FCM_TOPIC:-incubator_alerts}
     volumes:

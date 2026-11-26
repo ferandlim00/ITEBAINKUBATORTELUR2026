@@ -1,20 +1,33 @@
 package services
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
 	"strings"
 	"testing"
 	"time"
 )
 
-func TestTelegramNotifierConfigured(t *testing.T) {
-	if NewTelegramNotifier("", "123").IsConfigured() {
-		t.Fatal("expected unconfigured when botToken is empty")
+func TestFCMNotifierConfigured(t *testing.T) {
+	var nilFCM *FCMNotifier
+	if nilFCM.IsConfigured() {
+		t.Fatal("nil FCMNotifier must not be configured")
 	}
-	if NewTelegramNotifier("abc", " ").IsConfigured() {
-		t.Fatal("expected unconfigured when chatID is whitespace")
+	if (&FCMNotifier{projectID: "demo"}).IsConfigured() {
+		t.Fatal("FCMNotifier without privateKey must not be configured")
 	}
-	if !NewTelegramNotifier("abc", "123").IsConfigured() {
-		t.Fatal("expected configured when both token and chatID are provided")
+
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatalf("failed to generate test rsa key: %v", err)
+	}
+	fcm := &FCMNotifier{
+		projectID:  "parkir-cerdas-realtime",
+		privateKey: key,
+		topic:      DefaultFCMTopic,
+	}
+	if !fcm.IsConfigured() {
+		t.Fatal("expected FCMNotifier with projectID and privateKey to be configured")
 	}
 }
 
@@ -38,35 +51,32 @@ func TestFormatAlertHeaderAndLabel(t *testing.T) {
 	if !strings.Contains(h3, "SUHU RENDAH") {
 		t.Fatalf("unexpected header for low_temperature: %q", h3)
 	}
-
-	rendered := formatTelegramHTMLMessage("over_temperature", "high", "Suhu 38.9°C terlalu panas.", time.Date(2026, 11, 26, 10, 0, 0, 0, time.UTC))
-	if strings.Contains(rendered, "<code>") {
-		t.Fatalf("expected human-readable message without internal <code> tags, got: %s", rendered)
-	}
 }
 
-func TestTelegramCooldownAntiSpam(t *testing.T) {
-	tg := NewTelegramNotifier("tok", "chat")
+func TestFCMCooldownAntiSpam(t *testing.T) {
+	fcm := &FCMNotifier{
+		cooldowns: make(map[string]time.Time),
+	}
 	fakeNow := time.Date(2026, 11, 26, 10, 0, 0, 0, time.UTC)
-	tg.nowFn = func() time.Time { return fakeNow }
+	fcm.nowFn = func() time.Time { return fakeNow }
 
-	if !tg.allowSend("alert:inkubator-01:over_temperature", 5*time.Minute) {
+	if !fcm.allowSend("alert:inkubator-01:over_temperature", 5*time.Minute) {
 		t.Fatal("first send must be allowed")
 	}
-	if tg.allowSend("alert:inkubator-01:over_temperature", 5*time.Minute) {
+	if fcm.allowSend("alert:inkubator-01:over_temperature", 5*time.Minute) {
 		t.Fatal("immediate repeat for same key must be throttled")
 	}
-	if !tg.allowSend("alert:inkubator-01:low_temperature", 5*time.Minute) {
+	if !fcm.allowSend("alert:inkubator-01:low_temperature", 5*time.Minute) {
 		t.Fatal("different alert key must not be blocked")
 	}
 
 	fakeNow = fakeNow.Add(4 * time.Minute)
-	if tg.allowSend("alert:inkubator-01:over_temperature", 5*time.Minute) {
+	if fcm.allowSend("alert:inkubator-01:over_temperature", 5*time.Minute) {
 		t.Fatal("send before 5m cooldown expires must still be throttled")
 	}
 
 	fakeNow = fakeNow.Add(1 * time.Minute)
-	if !tg.allowSend("alert:inkubator-01:over_temperature", 5*time.Minute) {
+	if !fcm.allowSend("alert:inkubator-01:over_temperature", 5*time.Minute) {
 		t.Fatal("send after cooldown elapsed must be allowed")
 	}
 }

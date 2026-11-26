@@ -35,14 +35,12 @@ func main() {
 	defer db.Close()
 
 	fcm := services.NewFCMNotifier(cfg.FirebaseCredentialsFile, cfg.FCMTopic)
-	tg := services.NewTelegramNotifier(cfg.TelegramBotToken, cfg.TelegramChatID)
-	tg.SetFCM(fcm)
 	limiter := middleware.NewLoginRateLimiter(5, time.Minute)
 
 	authHandler := handlers.NewAuthHandler(db, cfg, limiter)
-	telemetryHandler := handlers.NewTelemetryHandler(db, cfg, tg)
+	telemetryHandler := handlers.NewTelemetryHandler(db, cfg, fcm)
 	commandsHandler := handlers.NewCommandsHandler(db, cfg)
-	settingsHandler := handlers.NewSettingsHandler(db, cfg, tg)
+	settingsHandler := handlers.NewSettingsHandler(db, cfg, fcm)
 	alertsAuditHandler := handlers.NewAlertsAuditHandler(db, cfg)
 
 	app := fiber.New(fiber.Config{
@@ -114,7 +112,6 @@ func main() {
 	protected.Put("/settings/motor", settingsHandler.UpdateMotorSettings)
 	protected.Put("/settings/wifi", settingsHandler.UpdateWifiSettings)
 	protected.Put("/settings/notifications", settingsHandler.UpdateNotificationSettings)
-	protected.Post("/settings/notifications/test-telegram", settingsHandler.TestTelegramNotification)
 	protected.Post("/settings/notifications/test-fcm", settingsHandler.TestFCMNotification)
 
 	// Sajikan build statis Frontend SvelteKit (SPA) jika folder public/index.html tersedia (mode Railway / Single Container)
@@ -131,7 +128,7 @@ func main() {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				handlers.CheckStaleDevice(db, cfg, tg)
+				handlers.CheckStaleDevice(db, cfg, fcm)
 			}
 		}
 	}()

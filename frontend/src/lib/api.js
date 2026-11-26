@@ -227,8 +227,8 @@ export async function saveWifi({ ssid, password }) {
 }
 
 const mockNotificationSettings = {
-  telegram_enabled: true,
-  telegram_configured: false,
+  fcm_enabled: true,
+  fcm_configured: false,
   over_temperature: true,
   low_temperature: true,
   sensor_error: true,
@@ -248,13 +248,16 @@ export async function saveNotificationSettings(patch) {
   return request('/settings/notifications', { method: 'PUT', body: JSON.stringify(patch) });
 }
 
-export async function testTelegramNotification() {
+export async function testFcmNotification(type = 'general') {
   if (USE_MOCK) {
     await tunggu(300);
-    if (!mockNotificationSettings.telegram_configured) throw new Error('Mode mock: token Bot Telegram belum diisi di server.');
-    return { status: 'ok', message: 'Simulasi: pesan uji berhasil dikirim ke Telegram.' };
+    if (!mockNotificationSettings.fcm_configured) throw new Error('Mode mock: file kredensial Firebase (FCM) belum dikonfigurasi di server.');
+    return { status: 'ok', message: 'Simulasi: push notification uji berhasil dikirim ke Firebase Cloud Messaging.' };
   }
-  return request('/settings/notifications/test-telegram', { method: 'POST' });
+  return request('/settings/notifications/test-fcm', {
+    method: 'POST',
+    body: JSON.stringify({ type })
+  });
 }
 
 // ---------- Riwayat data sensor untuk grafik ----------

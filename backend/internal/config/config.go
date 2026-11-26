@@ -31,8 +31,6 @@ type Config struct {
 	OperatorUsername string
 	OperatorPassword string
 
-	TelegramBotToken        string
-	TelegramChatID          string
 	FirebaseCredentialsFile string
 	FCMTopic                string
 
@@ -73,13 +71,27 @@ func Load() (*Config, error) {
 		OperatorUsername: getEnv("OPERATOR_USERNAME", "operator1"),
 		OperatorPassword: getEnv("OPERATOR_PASSWORD", "operator12345"),
 
-		TelegramBotToken:        strings.TrimSpace(os.Getenv("TELEGRAM_BOT_TOKEN")),
-		TelegramChatID:          strings.TrimSpace(os.Getenv("TELEGRAM_CHAT_ID")),
-		FirebaseCredentialsFile: getEnv("FIREBASE_CREDENTIALS_FILE", "./firebase-service-account.json"),
+		FirebaseCredentialsFile: resolveFirebaseCredentialsPath(),
 		FCMTopic:                getEnv("FCM_TOPIC", "incubator_alerts"),
 
 		StaleSeconds: stale,
 	}, nil
+}
+
+func resolveFirebaseCredentialsPath() string {
+	if v := strings.TrimSpace(os.Getenv("FIREBASE_CREDENTIALS_FILE")); v != "" {
+		return v
+	}
+	candidates := []string{
+		"./firebase-service-account.json",
+		"../firebase-service-account.json",
+	}
+	for _, p := range candidates {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return "./firebase-service-account.json"
 }
 
 func getEnv(key, fallback string) string {

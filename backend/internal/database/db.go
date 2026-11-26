@@ -187,7 +187,7 @@ func runMigrations(db *sql.DB) error {
 
 		`CREATE TABLE IF NOT EXISTS notification_settings (
 			device_id VARCHAR(64) PRIMARY KEY,
-			telegram_enabled TINYINT(1) NOT NULL DEFAULT 1,
+			fcm_enabled TINYINT(1) NOT NULL DEFAULT 1,
 			over_temperature TINYINT(1) NOT NULL DEFAULT 1,
 			low_temperature TINYINT(1) NOT NULL DEFAULT 1,
 			sensor_error TINYINT(1) NOT NULL DEFAULT 1,
@@ -204,6 +204,26 @@ func runMigrations(db *sql.DB) error {
 			return fmt.Errorf("migrasi gagal: %w", err)
 		}
 	}
+
+	// Migrasi kompatibilitas otomatis: ubah kolom lama telegram_enabled -> fcm_enabled pada DB yang sudah ada (mis. VPS)
+	var hasFCMCol int
+	_ = db.QueryRow(
+		`SELECT COUNT(*) FROM information_schema.COLUMNS
+		 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'notification_settings' AND COLUMN_NAME = 'fcm_enabled'`,
+	).Scan(&hasFCMCol)
+	if hasFCMCol == 0 {
+		var hasTGCol int
+		_ = db.QueryRow(
+			`SELECT COUNT(*) FROM information_schema.COLUMNS
+			 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'notification_settings' AND COLUMN_NAME = 'telegram_enabled'`,
+		).Scan(&hasTGCol)
+		if hasTGCol > 0 {
+			_, _ = db.Exec(`ALTER TABLE notification_settings CHANGE COLUMN telegram_enabled fcm_enabled TINYINT(1) NOT NULL DEFAULT 1`)
+		} else {
+			_, _ = db.Exec(`ALTER TABLE notification_settings ADD COLUMN fcm_enabled TINYINT(1) NOT NULL DEFAULT 1 AFTER device_id`)
+		}
+	}
+
 	return nil
 }
 

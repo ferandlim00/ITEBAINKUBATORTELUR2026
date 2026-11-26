@@ -43,6 +43,8 @@ type FCMNotifier struct {
 	mu          sync.Mutex
 	accessToken string
 	tokenExpiry time.Time
+	cooldowns   map[string]time.Time
+	nowFn       func() time.Time
 }
 
 // NewFCMNotifier loads a Firebase service account JSON file if available.
@@ -92,6 +94,8 @@ func NewFCMNotifier(credentialsPath, topic string) *FCMNotifier {
 		tokenURI:    tokenURI,
 		topic:       targetTopic,
 		client:      &http.Client{Timeout: 8 * time.Second},
+		cooldowns:   make(map[string]time.Time),
+		nowFn:       time.Now,
 	}
 }
 
@@ -242,11 +246,109 @@ func (f *FCMNotifier) SendTopicAlert(alertType, severity, message string) error 
 }
 
 // SendTest sends a synchronous test push notification to subscribed Android devices.
-func (f *FCMNotifier) SendTest(username string) error {
+func (f *FCMNotifier) SendTest(username, simType string) error {
 	who := strings.TrimSpace(username)
 	if who == "" {
 		who = "operator"
 	}
-	msg := fmt.Sprintf("Notifikasi Push Firebase Smart Hatchery berhasil diuji oleh %s!", who)
-	return f.SendTopicAlert("general", "info", msg)
+	switch strings.TrimSpace(simType) {
+	case "over_temperature":
+		return f.SendTopicAlert("over_temperature", "high",
+			fmt.Sprintf("[UJI SIMULASI oleh %s] Suhu inkubator terdeteksi 39.2°C (melewati batas aman 38.5°C)!", who))
+	case "low_temperature":
+		return f.SendTopicAlert("low_temperature", "medium",
+			fmt.Sprintf("[UJI SIMULASI oleh %s] Suhu inkubator turun ke 35.8°C (di bawah batas 36.5°C).", who))
+	case "motor_fault":
+		return f.SendTopicAlert("motor_fault", "high",
+			fmt.Sprintf("[UJI SIMULASI oleh %s] Motor pembalik aktif tetapi sensor encoder tidak mendeteksi putaran!", who))
+	case "communication":
+		return f.SendTopicAlert("communication", "high",
+			fmt.Sprintf("[UJI SIMULASI oleh %s] Perangkat ESP32 tidak mengirim telemetri lebih dari 45 detik.", who))
+	default:
+		msg := fmt.Sprintf("Notifikasi Push Firebase Smart Hatchery berhasil diuji oleh %s!", who)
+		return f.SendTopicAlert("general", "info", msg)
+	}
+}
+
+func (f *FCMNotifier) allowSend(cooldownKey string, cooldown time.Duration) bool {
+	if cooldown <= 0 || cooldownKey == "" {
+		return true
+	}
+	now := time.Now()
+	if f.nowFn != nil {
+		now = f.nowFn()
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.cooldowns == nil {
+		f.cooldowns = make(map[string]time.Time)
+	}
+	if last, ok := f.cooldowns[cooldownKey]; ok && now.Sub(last) < cooldown {
+		return false
+	}
+	f.cooldowns[cooldownKey] = now
+	return true
+}
+
+// SendWithCooldown asynchronously sends a push notification via FCM unless cooldownKey fired too recently.
+func (f *FCMNotifier) SendWithCooldown(cooldownKey, alertType, severity, message string, cooldown time.Duration) {
+	if !f.IsConfigured() {
+		return
+	}
+	if !f.allowSend(cooldownKey, cooldown) {
+		return
+	}
+	go func() {
+		if err := f.SendTopicAlert(alertType, severity, message); err != nil {
+			log.Printf("[FCM] Gagal kirim notifikasi (%s): %v", alertType, err)
+		}
+	}()
+}
+
+func formatAlertHeaderAndLabel(alertType, severity, message string) (string, string) {
+	labels := map[string]string{
+		"over_temperature": "Suhu Terlalu Panas (Melewati 38.5°C)",
+		"low_temperature":  "Suhu Terlalu Dingin (Di Bawah 36.5°C)",
+		"sensor_error":     "Sensor Suhu & Kelembapan SHT30/SHT31 Gagal Baca",
+		"humidity_warning": "Kelembapan Di Luar Rentang Aman",
+		"communication":    "Gangguan Komunikasi ESP32 / Wi-Fi",
+		"motor_fault":      "Gangguan Sistem Pembalik Telur",
+		"general":          "Informasi Umum & Siklus Inkubasi",
+	}
+	label := labels[alertType]
+	if label == "" {
+		label = "Notifikasi Sistem Inkubator"
+	}
+
+	if alertType == "general" || severity == "info" {
+		lower := strings.ToLower(message)
+		if strings.Contains(lower, "kembali") || strings.Contains(lower, "pulih") || strings.Contains(lower, "normal") {
+			return "✅ INFO PEMULIHAN INKUBATOR", "Kondisi Kembali Stabil"
+		}
+		return "ℹ️ INFO INKUBATOR SMART HATCHERY", label
+	}
+
+	switch alertType {
+	case "over_temperature":
+		return "🚨 PERINGATAN SUHU TINGGI (DARURAT)", label
+	case "low_temperature":
+		return "❄️ PERINGATAN SUHU RENDAH", label
+	case "humidity_warning":
+		return "💧 PERINGATAN KELEMBAPAN", label
+	case "sensor_error":
+		return "🔌 GANGGUAN SENSOR SHT30/SHT31", label
+	case "communication":
+		return "📡 KONEKSI PERANGKAT TERPUTUS", label
+	case "motor_fault":
+		return "⚙️ GANGGUAN PEMBALIK TELUR", label
+	}
+
+	switch severity {
+	case "high":
+		return "🚨 PERINGATAN DARURAT INKUBATOR", label
+	case "medium":
+		return "⚠️ PERINGATAN INKUBATOR", label
+	default:
+		return "ℹ️ PEMBERITAHUAN INKUBATOR", label
+	}
 }

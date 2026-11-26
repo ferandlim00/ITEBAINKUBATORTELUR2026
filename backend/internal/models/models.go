@@ -158,17 +158,17 @@ type MotorSettings struct {
 	SpeedPercent    int `json:"speed_percent"`
 }
 
-// NotificationSettings models per-type notification switches for Telegram and browser alerts.
+// NotificationSettings models per-type notification switches for Firebase Cloud Messaging and browser alerts.
 type NotificationSettings struct {
-	TelegramEnabled    bool `json:"telegram_enabled"`
-	TelegramConfigured bool `json:"telegram_configured"`
-	OverTemperature    bool `json:"over_temperature"`
-	LowTemperature     bool `json:"low_temperature"`
-	SensorError        bool `json:"sensor_error"`
-	HumidityWarning    bool `json:"humidity_warning"`
-	Communication      bool `json:"communication"`
-	MotorFault         bool `json:"motor_fault"`
-	General            bool `json:"general"`
+	FCMEnabled      bool `json:"fcm_enabled"`
+	FCMConfigured   bool `json:"fcm_configured"`
+	OverTemperature bool `json:"over_temperature"`
+	LowTemperature  bool `json:"low_temperature"`
+	SensorError     bool `json:"sensor_error"`
+	HumidityWarning bool `json:"humidity_warning"`
+	Communication   bool `json:"communication"`
+	MotorFault      bool `json:"motor_fault"`
+	General         bool `json:"general"`
 }
 
 // IsTypeEnabled reports whether notifications are enabled for the given alert type.

@@ -19,12 +19,12 @@ import (
 type SettingsHandler struct {
 	db  *sql.DB
 	cfg *config.Config
-	tg  *services.TelegramNotifier
+	fcm *services.FCMNotifier
 }
 
 // NewSettingsHandler creates a new SettingsHandler.
-func NewSettingsHandler(db *sql.DB, cfg *config.Config, tg *services.TelegramNotifier) *SettingsHandler {
-	return &SettingsHandler{db: db, cfg: cfg, tg: tg}
+func NewSettingsHandler(db *sql.DB, cfg *config.Config, fcm *services.FCMNotifier) *SettingsHandler {
+	return &SettingsHandler{db: db, cfg: cfg, fcm: fcm}
 }
 
 // GetDeviceSettings handles GET /api/settings/device (never exposes Wi-Fi password).
@@ -264,26 +264,26 @@ func (h *SettingsHandler) UpdateWifiSettings(c fiber.Ctx) error {
 	return c.JSON(fiber.Map{"status": "sent"})
 }
 
-func loadNotificationSettings(db *sql.DB, cfg *config.Config, tg *services.TelegramNotifier) models.NotificationSettings {
+func loadNotificationSettings(db *sql.DB, cfg *config.Config, fcm *services.FCMNotifier) models.NotificationSettings {
 	res := models.NotificationSettings{
-		TelegramEnabled:    true,
-		TelegramConfigured: tg != nil && tg.IsConfigured(),
-		OverTemperature:    true,
-		LowTemperature:     true,
-		SensorError:        true,
-		HumidityWarning:    true,
-		Communication:      true,
-		MotorFault:         true,
-		General:            true,
+		FCMEnabled:      true,
+		FCMConfigured:   fcm != nil && fcm.IsConfigured(),
+		OverTemperature: true,
+		LowTemperature:  true,
+		SensorError:     true,
+		HumidityWarning: true,
+		Communication:   true,
+		MotorFault:      true,
+		General:         true,
 	}
 
 	err := db.QueryRow(
-		`SELECT telegram_enabled, over_temperature, low_temperature, sensor_error,
+		`SELECT fcm_enabled, over_temperature, low_temperature, sensor_error,
 		        humidity_warning, communication, motor_fault, general
 		 FROM notification_settings WHERE device_id = ? LIMIT 1`,
 		cfg.DeviceID,
 	).Scan(
-		&res.TelegramEnabled,
+		&res.FCMEnabled,
 		&res.OverTemperature,
 		&res.LowTemperature,
 		&res.SensorError,
@@ -300,7 +300,7 @@ func loadNotificationSettings(db *sql.DB, cfg *config.Config, tg *services.Teleg
 
 // GetNotificationSettings handles GET /api/settings/notifications (works even when ESP32 is offline).
 func (h *SettingsHandler) GetNotificationSettings(c fiber.Ctx) error {
-	return c.JSON(loadNotificationSettings(h.db, h.cfg, h.tg))
+	return c.JSON(loadNotificationSettings(h.db, h.cfg, h.fcm))
 }
 
 // UpdateNotificationSettings handles PUT /api/settings/notifications (supports partial toggles).
@@ -308,7 +308,7 @@ func (h *SettingsHandler) UpdateNotificationSettings(c fiber.Ctx) error {
 	user := middleware.CurrentUser(c)
 
 	var body struct {
-		TelegramEnabled *bool `json:"telegram_enabled"`
+		FCMEnabled      *bool `json:"fcm_enabled"`
 		OverTemperature *bool `json:"over_temperature"`
 		LowTemperature  *bool `json:"low_temperature"`
 		SensorError     *bool `json:"sensor_error"`
@@ -323,7 +323,7 @@ func (h *SettingsHandler) UpdateNotificationSettings(c fiber.Ctx) error {
 		})
 	}
 
-	if body.TelegramEnabled == nil && body.OverTemperature == nil && body.LowTemperature == nil &&
+	if body.FCMEnabled == nil && body.OverTemperature == nil && body.LowTemperature == nil &&
 		body.SensorError == nil && body.HumidityWarning == nil && body.Communication == nil &&
 		body.MotorFault == nil && body.General == nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -331,7 +331,7 @@ func (h *SettingsHandler) UpdateNotificationSettings(c fiber.Ctx) error {
 		})
 	}
 
-	current := loadNotificationSettings(h.db, h.cfg, h.tg)
+	current := loadNotificationSettings(h.db, h.cfg, h.fcm)
 	changed := make([]string, 0, 8)
 	apply := func(name string, ptr *bool, target *bool) {
 		if ptr != nil && *ptr != *target {
@@ -344,7 +344,7 @@ func (h *SettingsHandler) UpdateNotificationSettings(c fiber.Ctx) error {
 		}
 	}
 
-	apply("telegram", body.TelegramEnabled, &current.TelegramEnabled)
+	apply("fcm", body.FCMEnabled, &current.FCMEnabled)
 	apply("over_temperature", body.OverTemperature, &current.OverTemperature)
 	apply("low_temperature", body.LowTemperature, &current.LowTemperature)
 	apply("sensor_error", body.SensorError, &current.SensorError)
@@ -355,11 +355,11 @@ func (h *SettingsHandler) UpdateNotificationSettings(c fiber.Ctx) error {
 
 	if _, err := h.db.Exec(
 		`INSERT INTO notification_settings (
-			device_id, telegram_enabled, over_temperature, low_temperature, sensor_error,
+			device_id, fcm_enabled, over_temperature, low_temperature, sensor_error,
 			humidity_warning, communication, motor_fault, general, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())
 		ON DUPLICATE KEY UPDATE
-			telegram_enabled = VALUES(telegram_enabled),
+			fcm_enabled = VALUES(fcm_enabled),
 			over_temperature = VALUES(over_temperature),
 			low_temperature = VALUES(low_temperature),
 			sensor_error = VALUES(sensor_error),
@@ -369,7 +369,7 @@ func (h *SettingsHandler) UpdateNotificationSettings(c fiber.Ctx) error {
 			general = VALUES(general),
 			updated_at = UTC_TIMESTAMP()`,
 		h.cfg.DeviceID,
-		current.TelegramEnabled, current.OverTemperature, current.LowTemperature, current.SensorError,
+		current.FCMEnabled, current.OverTemperature, current.LowTemperature, current.SensorError,
 		current.HumidityWarning, current.Communication, current.MotorFault, current.General,
 	); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -384,40 +384,26 @@ func (h *SettingsHandler) UpdateNotificationSettings(c fiber.Ctx) error {
 	return c.JSON(current)
 }
 
-// TestTelegramNotification handles POST /api/settings/notifications/test-telegram.
-func (h *SettingsHandler) TestTelegramNotification(c fiber.Ctx) error {
-	user := middleware.CurrentUser(c)
-	if h.tg == nil || !h.tg.IsConfigured() {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"message": "Token atau Chat ID Telegram belum diisi di file .env server.",
-		})
-	}
-	if err := h.tg.SendTest(user.Username); err != nil {
-		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{
-			"message": err.Error(),
-		})
-	}
-	return c.JSON(fiber.Map{
-		"status":  "ok",
-		"message": "Pesan uji berhasil dikirim ke Telegram Bot.",
-	})
-}
-
 // TestFCMNotification handles POST /api/settings/notifications/test-fcm.
 func (h *SettingsHandler) TestFCMNotification(c fiber.Ctx) error {
 	user := middleware.CurrentUser(c)
-	if h.tg == nil || !h.tg.HasFCM() {
+	if h.fcm == nil || !h.fcm.IsConfigured() {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"message": "Firebase Cloud Messaging belum dikonfigurasi di server.",
 		})
 	}
-	if err := h.tg.SendTestFCM(user.Username); err != nil {
+	var body struct {
+		Type string `json:"type"`
+	}
+	_ = c.Bind().JSON(&body)
+
+	if err := h.fcm.SendTest(user.Username, body.Type); err != nil {
 		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{
 			"message": err.Error(),
 		})
 	}
 	return c.JSON(fiber.Map{
 		"status":  "ok",
-		"message": "Push notification uji berhasil dikirim ke Firebase Cloud Messaging.",
+		"message": "Push notification uji berhasil dikirim ke Firebase Cloud Messaging. Periksa notifikasi di HP Android Anda!",
 	})
 }

@@ -123,7 +123,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 
 CREATE TABLE IF NOT EXISTS notification_settings (
   device_id VARCHAR(64) PRIMARY KEY,
-  telegram_enabled TINYINT(1) NOT NULL DEFAULT 1,
+  fcm_enabled TINYINT(1) NOT NULL DEFAULT 1,
   over_temperature TINYINT(1) NOT NULL DEFAULT 1,
   low_temperature TINYINT(1) NOT NULL DEFAULT 1,
   sensor_error TINYINT(1) NOT NULL DEFAULT 1,
