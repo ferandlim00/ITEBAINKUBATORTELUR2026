@@ -11,6 +11,11 @@ android-app/.gradle/
 android-app/build/
 android-app/app/build/
 android-app/local.properties
+android-native/app/google-services.json
+android-native/.gradle/
+android-native/build/
+android-native/app/build/
+android-native/local.properties
 *.apk
 
 # Node / SvelteKit
