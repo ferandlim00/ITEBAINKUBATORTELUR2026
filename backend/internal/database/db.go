@@ -132,6 +132,8 @@ func runMigrations(db *sql.DB) error {
 			wifi_connected TINYINT(1) NOT NULL DEFAULT 0,
 			wifi_ssid VARCHAR(32) NOT NULL DEFAULT '',
 			wifi_rssi INT NULL,
+			buzzer_muted TINYINT(1) NOT NULL DEFAULT 0,
+			buzzer_style VARCHAR(24) NOT NULL DEFAULT 'rock_beat',
 			last_command_id BIGINT NULL,
 			last_command_target VARCHAR(32) NULL,
 			last_command_action VARCHAR(32) NULL,
@@ -222,6 +224,25 @@ func runMigrations(db *sql.DB) error {
 		} else {
 			_, _ = db.Exec(`ALTER TABLE notification_settings ADD COLUMN fcm_enabled TINYINT(1) NOT NULL DEFAULT 1 AFTER device_id`)
 		}
+	}
+
+	// Migrasi otomatis kolom buzzer_muted & buzzer_style pada tabel device_state (kompatibel VPS lama)
+	var hasBzMuted int
+	_ = db.QueryRow(
+		`SELECT COUNT(*) FROM information_schema.COLUMNS
+		 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'device_state' AND COLUMN_NAME = 'buzzer_muted'`,
+	).Scan(&hasBzMuted)
+	if hasBzMuted == 0 {
+		_, _ = db.Exec(`ALTER TABLE device_state ADD COLUMN buzzer_muted TINYINT(1) NOT NULL DEFAULT 0 AFTER wifi_rssi`)
+	}
+
+	var hasBzStyle int
+	_ = db.QueryRow(
+		`SELECT COUNT(*) FROM information_schema.COLUMNS
+		 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'device_state' AND COLUMN_NAME = 'buzzer_style'`,
+	).Scan(&hasBzStyle)
+	if hasBzStyle == 0 {
+		_, _ = db.Exec(`ALTER TABLE device_state ADD COLUMN buzzer_style VARCHAR(24) NOT NULL DEFAULT 'rock_beat' AFTER buzzer_muted`)
 	}
 
 	return nil

@@ -66,10 +66,15 @@
 #define PIN_DIMMER_ZC       34  // Input Zero-Cross Detector RobotDyn AC Dimmer
 
 // Lebar pulsa Servo MG996R (standar 50 Hz: 500 us = 0 deg, 2500 us = 180 deg)
+// Menggunakan Hardware LEDC 14-bit langsung (Channel 2 / Timer 1) agar bebas bug double-attach ESP32Servo di Core 3.x.
 // Catatan daya: MG996R menarik arus hingga ~2.5 A saat stall (4.8-6.6 V), WAJIB pakai
-// catu +5V TB-1512 minimal 3 A + kapasitor 470-1000 uF dekat konektor servo.
-#define SERVO_PULSE_MIN_US  500
-#define SERVO_PULSE_MAX_US  2500
+// catu +5V TB-1512 minimal 3 A + kapasitor 470-1000 uF + satukan GND adaptor servo ke GND ESP32.
+#define SERVO_PULSE_MIN_US   500
+#define SERVO_PULSE_MAX_US   2500
+#define SERVO_LEDC_CHANNEL   2
+#define SERVO_LEDC_BITS      14
+#define BUZZER_LEDC_CHANNEL  4
+#define BUZZER_LEDC_BITS     10
 
 // Alamat I2C Perangkat (Agar Tidak Bentrok)
 #define I2C_ADDR_SHT30      0x44
@@ -306,6 +311,12 @@ struct IncubatorState {
   bool   commAlertPending  = false;
   String commAlertMessage  = "";
 
+  // Pengaturan Buzzer Lagu Rock & Mute + Pengaturan Tampilan OLED (tersimpan di NVS)
+  bool    buzzerMuted      = false; // true = alarm dibisukan (MUTE)
+  uint8_t buzzerStyle      = 0;     // 0 = Rock Beat (We Will Rock You), 1 = Rock Nada (Smoke on the Water)
+  uint8_t oledBrightness   = 2;     // 0 = Hemat (Redup), 1 = Sedang, 2 = Cerah Penuh
+  bool    oledSwapScreens  = false; // true = tukar posisi tampilan OLED 1 <-> OLED 2
+
   // Status Koneksi ke Server Web (untuk ditampilkan di OLED)
   bool   backendChecked    = false;
   bool   backendConnected  = false;
@@ -444,6 +455,10 @@ void loadSettingsFromNVS() {
   state.lampIntensity        = prefs.getInt("lamp_int", 0);
   state.ventMode             = prefs.getString("vent_mode", "auto");
   state.ventAngle            = prefs.getInt("vent_ang", VENT_MODE_ANGLES[1]);
+  state.buzzerMuted          = prefs.getBool("bz_mute", false);
+  state.buzzerStyle          = (uint8_t)constrain((int)prefs.getUChar("bz_style", 0), 0, 1);
+  state.oledBrightness       = (uint8_t)constrain((int)prefs.getUChar("oled_br", 2), 0, 2);
+  state.oledSwapScreens      = prefs.getBool("oled_swap", false);
   prefs.end();
 
   state.lampFloatPct        = (float)state.lampIntensity;
@@ -479,14 +494,57 @@ void saveSettingsToNVS() {
   prefs.putInt("lamp_int", state.lampIntensity);
   prefs.putString("vent_mode", state.ventMode);
   prefs.putInt("vent_ang", state.ventAngle);
+  prefs.putBool("bz_mute", state.buzzerMuted);
+  prefs.putUChar("bz_style", state.buzzerStyle);
+  prefs.putUChar("oled_br", state.oledBrightness);
+  prefs.putBool("oled_swap", state.oledSwapScreens);
   prefs.end();
 
   dimmerZCPaused = false;
 }
 
 // ============================================================================
-// 9. AKTUATOR: ROBOTDYN AC DIMMER (GPIO 25/34), SERVO MG996R (GPIO 18), BUZZER
+// 9. AKTUATOR: SERVO MG996R LEDC 14-BIT (GPIO 18), BUZZER LAGU ROCK + MUTE (GPIO 19)
 // ============================================================================
+bool          servoHwReady        = false;
+int           lastServoHwAngle    = -1;
+bool          servoTestActive     = false;
+unsigned long servoTestStartMs    = 0;
+unsigned long lastTurnSweepStepMs = 0;
+int           turnSweepAngle      = 0;
+int           turnSweepDir        = 1;
+
+bool initServoHardware() {
+#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+  ledcDetach(PIN_SERVO_MG996R);
+  servoHwReady = ledcAttachChannel(PIN_SERVO_MG996R, 50, SERVO_LEDC_BITS, SERVO_LEDC_CHANNEL);
+#else
+  double f = ledcSetup(SERVO_LEDC_CHANNEL, 50, SERVO_LEDC_BITS);
+  ledcAttachPin(PIN_SERVO_MG996R, SERVO_LEDC_CHANNEL);
+  servoHwReady = (f > 0.0);
+#endif
+  Serial.printf("[SERVO] Hardware LEDC 14-bit (50Hz, Ch %d) pada GPIO %d -> %s\n",
+                SERVO_LEDC_CHANNEL, PIN_SERVO_MG996R, servoHwReady ? "OK" : "GAGAL");
+  return servoHwReady;
+}
+
+void writeServoRawAngle(int angleDeg) {
+  if (!servoHwReady) {
+    initServoHardware();
+  }
+  int clamped = constrain(angleDeg, 0, 180);
+  int pulseUs = map(clamped, 0, 180, SERVO_PULSE_MIN_US, SERVO_PULSE_MAX_US);
+  uint32_t maxDuty = (1UL << SERVO_LEDC_BITS) - 1UL; // 16383
+  uint32_t duty    = (uint32_t)(((uint64_t)pulseUs * maxDuty + 10000ULL) / 20000ULL);
+
+#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+  ledcWrite(PIN_SERVO_MG996R, duty);
+#else
+  ledcWrite(SERVO_LEDC_CHANNEL, duty);
+#endif
+  lastServoHwAngle = clamped;
+}
+
 void applyLampOutput(int intensityPercent) {
   int clamped = constrain(intensityPercent, 0, 100);
   if (state.lampMode == "manual") {
@@ -510,28 +568,36 @@ void applyLampOutput(int intensityPercent) {
 
 void applyVentilationOutput(int angleDeg) {
   int clamped = constrain(angleDeg, VENT_ANGLE_MIN, VENT_ANGLE_MAX);
-  // Pastikan servo masih ter-attach (bisa lepas jika channel LEDC gagal dialokasikan saat boot)
-  if (!mg996rServo.attached()) {
-    mg996rServo.setPeriodHertz(50);
-    int ch = mg996rServo.attach(PIN_SERVO_MG996R, SERVO_PULSE_MIN_US, SERVO_PULSE_MAX_US);
-    Serial.printf("[SERVO] Re-attach GPIO %d -> %s\n", PIN_SERVO_MG996R, mg996rServo.attached() ? "OK" : "GAGAL");
-    (void)ch;
-  }
   bool changed = (state.ventAngle != clamped);
   state.ventAngle = clamped;
-  mg996rServo.write(clamped);
+  // Jangan timpa gerakan fisik servo bila sedang siklus balik telur atau tes servo
+  if (!state.motorRunning && !servoTestActive) {
+    writeServoRawAngle(clamped);
+  }
   if (changed) Serial.printf("[SERVO] Ventilasi -> %d deg (mode=%s)\n", clamped, state.ventMode.c_str());
+}
+
+void startServoHardwareTest() {
+  servoTestActive  = true;
+  servoTestStartMs = millis();
+  writeServoRawAngle(0);
+  Serial.println("[SERVO] Tes gerak MG996R dimulai (0 -> 45 -> 90 -> 0 -> kembali)");
 }
 
 void startTurningCycle() {
   state.motorRunning     = true;
   state.turningStatus    = "turning";
   state.motorTurnStartMs = millis();
-  Serial.printf("[TURNING] Siklus balik telur aktif selama %d detik\n", state.motorDurationSeconds);
+  lastTurnSweepStepMs    = millis();
+  turnSweepAngle         = constrain(state.ventAngle, 0, 90);
+  turnSweepDir           = (turnSweepAngle < 45) ? 1 : -1;
+  Serial.printf("[TURNING] Siklus balik telur + gerak servo MG996R aktif selama %d detik\n",
+                state.motorDurationSeconds);
 }
 
 void stopTurningCycle(bool completedNormally) {
   state.motorRunning = false;
+  writeServoRawAngle(state.ventAngle); // Kembalikan ke sudut bukaan ventilasi aktif
   if (completedNormally) {
     state.lastTurnedEpoch = getCurrentEpoch();
     if (state.incubationStatus == "running" && state.stage == "turning") {
@@ -548,25 +614,263 @@ void stopTurningCycle(bool completedNormally) {
   }
 }
 
-void updateBuzzerAlarm() {
-  bool isTempAlarm = (state.temperature > TEMP_SAFE_MAX || state.temperature < TEMP_SAFE_MIN);
-  bool isCritical  = isTempAlarm || state.sensorError;
+void updateServoMotions() {
+  unsigned long nowMs = millis();
 
-  if (!isCritical) {
-    if (buzzerPinState) {
-      digitalWrite(PIN_BUZZER_SFM27, LOW);
-      buzzerPinState = false;
+  // 1. Mode Tes Gerak Servo dari Menu OLED (durasi 3.2 detik: 0 -> 45 -> 90 -> 0 -> ventAngle)
+  if (servoTestActive) {
+    unsigned long el = nowMs - servoTestStartMs;
+    if (el < 800UL) {
+      if (lastServoHwAngle != 0) writeServoRawAngle(0);
+    } else if (el < 1600UL) {
+      if (lastServoHwAngle != 45) writeServoRawAngle(45);
+    } else if (el < 2400UL) {
+      if (lastServoHwAngle != 90) writeServoRawAngle(90);
+    } else if (el < 3200UL) {
+      if (lastServoHwAngle != 0) writeServoRawAngle(0);
+    } else {
+      servoTestActive = false;
+      writeServoRawAngle(state.ventAngle);
+      Serial.println("[SERVO] Tes gerak MG996R selesai.");
     }
     return;
   }
 
-  // Pola Beep-Beep intermiten (300ms ON, 700ms OFF)
+  // 2. Gerak Ayun Halus Servo MG996R Saat Siklus Pembalikan Telur ("Balik sekarang" / Jadwal)
+  if (state.motorRunning) {
+    unsigned long stepIntervalMs = (unsigned long)map(constrain(state.motorSpeedPercent, 10, 70), 10, 70, 55, 18);
+    if (nowMs - lastTurnSweepStepMs >= stepIntervalMs) {
+      lastTurnSweepStepMs = nowMs;
+      turnSweepAngle += turnSweepDir * 3;
+      if (turnSweepAngle >= 90) {
+        turnSweepAngle = 90;
+        turnSweepDir   = -1;
+      } else if (turnSweepAngle <= 0) {
+        turnSweepAngle = 0;
+        turnSweepDir   = 1;
+      }
+      writeServoRawAngle(turnSweepAngle);
+    }
+  }
+}
+
+// --- ENGINE BUZZER LAGU ROCK NON-BLOCKING + FITUR MUTE ---
+struct RockStep {
+  uint16_t freqHz; // Frekuensi PWM (dipakai pada mode Rock Nada; mode Rock Beat memakai DC HIGH murni)
+  uint16_t onMs;   // Durasi bunyi (ms)
+  uint16_t offMs;  // Jeda antar ketukan (ms)
+};
+
+// Lagu Rock 1 (Default): Queen - "We Will Rock You" (DUM - DUM - TAK!) + Rock Riff Syncopation
+// Paling keras, tegas, dan langsung dikenali pada Buzzer Aktif SFM-27 maupun Buzzer Pasif.
+const RockStep ROCK_SONG_BEAT[] = {
+  // Bar 1: DUM - DUM - TAK!!
+  { 196, 150,  90 }, { 196, 150,  90 }, { 392, 340, 360 },
+  // Bar 2: DUM - DUM - TAK!!
+  { 196, 150,  90 }, { 196, 150,  90 }, { 392, 340, 240 },
+  // Bar 3: Guitar Riff Cepat (da-da-DAA! da-da-DA-DAA!)
+  { 330, 115,  65 }, { 392, 115,  65 }, { 440, 230, 110 },
+  { 330, 115,  65 }, { 392, 115,  65 }, { 466, 120,  55 }, { 440, 300, 520 }
+};
+const uint8_t ROCK_SONG_BEAT_LEN = sizeof(ROCK_SONG_BEAT) / sizeof(ROCK_SONG_BEAT[0]);
+
+// Lagu Rock 2: Deep Purple - "Smoke on the Water" Riff (0 - 3 - 5 | 0 - 3 - 6 - 5 | 0 - 3 - 5 - 3 - 0)
+const RockStep ROCK_SONG_TONE[] = {
+  { 330, 220,  80 }, { 392, 220,  80 }, { 440, 360, 180 },
+  { 330, 220,  80 }, { 392, 220,  80 }, { 466, 170,  60 }, { 440, 360, 180 },
+  { 330, 220,  80 }, { 392, 220,  80 }, { 440, 320,  90 }, { 392, 220,  80 }, { 330, 420, 500 }
+};
+const uint8_t ROCK_SONG_TONE_LEN = sizeof(ROCK_SONG_TONE) / sizeof(ROCK_SONG_TONE[0]);
+
+// Jingle pendek konfirmasi aksi tombol (non-blocking)
+const RockStep CUE_START_RIFF[] = {
+  { 330, 95, 45 }, { 392, 95, 45 }, { 440, 95, 45 }, { 587, 280, 80 }
+};
+const RockStep CUE_STOP_RIFF[] = {
+  { 440, 130, 60 }, { 330, 130, 60 }, { 220, 260, 80 }
+};
+const RockStep CUE_WIFI_RIFF[] = {
+  { 392, 85, 50 }, { 523, 160, 60 }
+};
+const RockStep CUE_CLICK_TICK[] = {
+  { 523, 24, 20 }
+};
+
+enum BuzzerCueType {
+  BZ_CUE_NONE = 0,
+  BZ_CUE_CLICK,
+  BZ_CUE_START,
+  BZ_CUE_STOP,
+  BZ_CUE_WIFI,
+  BZ_CUE_PREVIEW_ROCK
+};
+
+bool          buzzerPwmAttached  = false;
+uint8_t       activeBuzzerCue    = BZ_CUE_NONE;
+uint8_t       buzzerStepIdx      = 0;
+bool          buzzerInOnPhase    = false;
+unsigned long buzzerPhaseStartMs = 0;
+bool          alarmWasActive     = false;
+
+void buzzerHwOff() {
+  if (buzzerPwmAttached) {
+#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+    ledcWrite(PIN_BUZZER_SFM27, 0);
+    ledcDetach(PIN_BUZZER_SFM27);
+#else
+    ledcWrite(BUZZER_LEDC_CHANNEL, 0);
+    ledcDetachPin(PIN_BUZZER_SFM27);
+#endif
+    buzzerPwmAttached = false;
+    pinMode(PIN_BUZZER_SFM27, OUTPUT);
+  }
+  digitalWrite(PIN_BUZZER_SFM27, LOW);
+  buzzerPinState = false;
+}
+
+void buzzerHwOn(uint16_t freqHz, bool useTonePwm) {
+  if (useTonePwm && freqHz > 0) {
+#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+    if (buzzerPwmAttached) {
+      ledcDetach(PIN_BUZZER_SFM27);
+    }
+    buzzerPwmAttached = ledcAttachChannel(PIN_BUZZER_SFM27, freqHz, BUZZER_LEDC_BITS, BUZZER_LEDC_CHANNEL);
+    if (buzzerPwmAttached) {
+      ledcWrite(PIN_BUZZER_SFM27, 1UL << (BUZZER_LEDC_BITS - 1)); // 50% duty square wave
+    } else {
+      pinMode(PIN_BUZZER_SFM27, OUTPUT);
+      digitalWrite(PIN_BUZZER_SFM27, HIGH);
+    }
+#else
+    ledcSetup(BUZZER_LEDC_CHANNEL, freqHz, BUZZER_LEDC_BITS);
+    if (!buzzerPwmAttached) {
+      ledcAttachPin(PIN_BUZZER_SFM27, BUZZER_LEDC_CHANNEL);
+      buzzerPwmAttached = true;
+    }
+    ledcWrite(BUZZER_LEDC_CHANNEL, 1UL << (BUZZER_LEDC_BITS - 1));
+#endif
+  } else {
+    if (buzzerPwmAttached) buzzerHwOff();
+    digitalWrite(PIN_BUZZER_SFM27, HIGH);
+  }
+  buzzerPinState = true;
+}
+
+void triggerBuzzerCue(uint8_t cue) {
+  if (state.buzzerMuted && cue != BZ_CUE_PREVIEW_ROCK) {
+    return;
+  }
+  activeBuzzerCue    = cue;
+  buzzerStepIdx      = 0;
+  buzzerInOnPhase    = false;
+  buzzerPhaseStartMs = 0;
+  buzzerHwOff();
+}
+
+void setBuzzerMuted(bool muted) {
+  state.buzzerMuted = muted;
+  if (muted) {
+    activeBuzzerCue = BZ_CUE_NONE;
+    buzzerHwOff();
+  }
+  saveSettingsToNVS();
+  Serial.printf("[BUZZER] Status Mute -> %s\n", muted ? "AKTIF (SENYAP)" : "BUNYI (ROCK)");
+}
+
+bool isAlarmConditionActive() {
+  bool isTempAlarm = (state.temperature > TEMP_SAFE_MAX || state.temperature < TEMP_SAFE_MIN);
+  return isTempAlarm || state.sensorError;
+}
+
+void updateBuzzerAlarm() {
   unsigned long nowMs = millis();
-  unsigned long interval = buzzerPinState ? 300UL : 700UL;
-  if (nowMs - lastBuzzerToggleMs >= interval) {
-    lastBuzzerToggleMs = nowMs;
-    buzzerPinState     = !buzzerPinState;
-    digitalWrite(PIN_BUZZER_SFM27, buzzerPinState ? HIGH : LOW);
+  bool useTone = (state.buzzerStyle == 1);
+
+  // 1. Prioritas Cue / Preview Lagu Rock (berjalan sekali sampai selesai)
+  if (activeBuzzerCue != BZ_CUE_NONE) {
+    const RockStep* seq = nullptr;
+    uint8_t seqLen = 0;
+    switch (activeBuzzerCue) {
+      case BZ_CUE_CLICK:        seq = CUE_CLICK_TICK; seqLen = 1; break;
+      case BZ_CUE_START:        seq = CUE_START_RIFF; seqLen = 4; break;
+      case BZ_CUE_STOP:         seq = CUE_STOP_RIFF;  seqLen = 3; break;
+      case BZ_CUE_WIFI:         seq = CUE_WIFI_RIFF;  seqLen = 2; break;
+      case BZ_CUE_PREVIEW_ROCK:
+        seq    = useTone ? ROCK_SONG_TONE : ROCK_SONG_BEAT;
+        seqLen = useTone ? ROCK_SONG_TONE_LEN : ROCK_SONG_BEAT_LEN;
+        break;
+      default: break;
+    }
+
+    if (seq == nullptr || buzzerStepIdx >= seqLen) {
+      activeBuzzerCue = BZ_CUE_NONE;
+      buzzerHwOff();
+      return;
+    }
+
+    if (buzzerPhaseStartMs == 0) {
+      buzzerInOnPhase    = true;
+      buzzerPhaseStartMs = nowMs;
+      buzzerHwOn(seq[buzzerStepIdx].freqHz, useTone);
+      return;
+    }
+
+    unsigned long dur = buzzerInOnPhase ? seq[buzzerStepIdx].onMs : seq[buzzerStepIdx].offMs;
+    if (nowMs - buzzerPhaseStartMs >= dur) {
+      buzzerPhaseStartMs = nowMs;
+      if (buzzerInOnPhase) {
+        buzzerInOnPhase = false;
+        buzzerHwOff();
+      } else {
+        buzzerStepIdx++;
+        if (buzzerStepIdx >= seqLen) {
+          activeBuzzerCue = BZ_CUE_NONE;
+          buzzerHwOff();
+        } else {
+          buzzerInOnPhase = true;
+          buzzerHwOn(seq[buzzerStepIdx].freqHz, useTone);
+        }
+      }
+    }
+    return;
+  }
+
+  // 2. Evaluasi Alarm Suhu / Sensor dengan Irama Lagu Rock + Dukungan MUTE
+  bool isCritical = isAlarmConditionActive();
+  if (!isCritical || state.buzzerMuted) {
+    if (buzzerPinState || buzzerPwmAttached || alarmWasActive) {
+      buzzerHwOff();
+      alarmWasActive     = false;
+      buzzerStepIdx      = 0;
+      buzzerInOnPhase    = false;
+      buzzerPhaseStartMs = 0;
+    }
+    return;
+  }
+
+  const RockStep* song = useTone ? ROCK_SONG_TONE : ROCK_SONG_BEAT;
+  uint8_t songLen      = useTone ? ROCK_SONG_TONE_LEN : ROCK_SONG_BEAT_LEN;
+
+  if (!alarmWasActive) {
+    alarmWasActive     = true;
+    buzzerStepIdx      = 0;
+    buzzerInOnPhase    = true;
+    buzzerPhaseStartMs = nowMs;
+    buzzerHwOn(song[0].freqHz, useTone);
+    return;
+  }
+
+  unsigned long waitMs = buzzerInOnPhase ? song[buzzerStepIdx].onMs : song[buzzerStepIdx].offMs;
+  if (nowMs - buzzerPhaseStartMs >= waitMs) {
+    buzzerPhaseStartMs = nowMs;
+    if (buzzerInOnPhase) {
+      buzzerInOnPhase = false;
+      buzzerHwOff();
+    } else {
+      buzzerStepIdx   = (buzzerStepIdx + 1) % songLen;
+      buzzerInOnPhase = true;
+      buzzerHwOn(song[buzzerStepIdx].freqHz, useTone);
+    }
   }
 }
 
@@ -847,22 +1151,55 @@ void evaluateFuzzyControl() {
 }
 
 // ============================================================================
-// 11. INPUT TOMBOL FISIK (PUSH BUTTON START GPIO 26 & GPIO 4)
+// 11. TOMBOL INTERAKTIF, VERIFIKASI 2 LANGKAH (MULAI/BERHENTI), & MENU PENGATURAN OLED
 // ============================================================================
-void tampilSplashSiklusDimulai() {
-  Adafruit_SSD1306* targetDisp = state.oled2Available ? &oled2 : (state.oledAvailable ? &oled : nullptr);
-  if (targetDisp == nullptr) return;
+void startWifiPortal();
+void stopWifiPortal();
+void updateOledDisplay();
 
-  targetDisp->clearDisplay();
-  targetDisp->drawFastHLine(0, 15, 128, SSD1306_WHITE);
-  targetDisp->setTextColor(SSD1306_WHITE);
-  targetDisp->setTextSize(1);
-  targetDisp->setCursor(22, 22);
-  targetDisp->print("SIKLUS DIMULAI");
-  targetDisp->setTextSize(2);
-  targetDisp->setCursor(16, 35);
-  targetDisp->print("DAY 01/21");
-  targetDisp->display();
+enum LocalUiMode {
+  LOCAL_UI_HOME = 0,          // Tampilan pemantauan normal
+  LOCAL_UI_MENU,              // Menu Pengaturan OLED & Kontrol Alat
+  LOCAL_UI_CONFIRM_START,     // Verifikasi Langkah ke-2: Konfirmasi Mulai Inkubasi
+  LOCAL_UI_CONFIRM_STOP,      // Verifikasi Langkah ke-2: Konfirmasi Hentikan Inkubasi
+  LOCAL_UI_TOAST              // Notifikasi visual aksi berhasil/batal (1.8 detik)
+};
+
+const unsigned long BTN_HOLD_CONFIRM_MS = 850UL;   // Tahan >= 0.85 detik = OK / Pilih
+const unsigned long LOCAL_UI_TIMEOUT_MS = 15000UL; // Otomatis tutup menu bila diam 15 detik
+const unsigned long LOCAL_TOAST_MS      = 1800UL;  // Durasi banner notifikasi OLED
+const uint8_t       OLED_MENU_COUNT     = 8;
+
+LocalUiMode   localUiMode       = LOCAL_UI_HOME;
+uint8_t       oledMenuCursor    = 0;
+uint8_t       confirmChoiceIdx  = 0; // 0 = [ BATAL ] (default aman), 1 = [ YA, LANJUT ]
+unsigned long localUiLastActMs  = 0;
+unsigned long localToastStartMs = 0;
+String        toastTitle        = "";
+String        toastSubtitle     = "";
+
+void applyOledContrastSettings() {
+  uint8_t contrast = 0xFF;
+  if (state.oledBrightness == 0)      contrast = 0x12; // Hemat / Redup
+  else if (state.oledBrightness == 1) contrast = 0x7F; // Sedang
+  else                                contrast = 0xFF; // Cerah Penuh
+
+  if (state.oledAvailable) {
+    oled.ssd1306_command(SSD1306_SETCONTRAST);
+    oled.ssd1306_command(contrast);
+  }
+  if (state.oled2Available) {
+    oled2.ssd1306_command(SSD1306_SETCONTRAST);
+    oled2.ssd1306_command(contrast);
+  }
+}
+
+void showOledToast(const String& title, const String& subtitle) {
+  toastTitle        = title;
+  toastSubtitle     = subtitle;
+  localUiMode       = LOCAL_UI_TOAST;
+  localToastStartMs = millis();
+  localUiLastActMs  = millis();
 }
 
 void startIncubationLocalOrRemote() {
@@ -878,7 +1215,8 @@ void startIncubationLocalOrRemote() {
   state.turningStatus    = "idle";
   state.ventForceEvalImmediate = true;
   saveSettingsToNVS();
-  tampilSplashSiklusDimulai();
+  triggerBuzzerCue(BZ_CUE_START);
+  showOledToast("SIKLUS DIMULAI", "DAY 01/21 Aktif!");
   Serial.println("[INKUBASI] Siklus 21 hari DIMULAI.");
 }
 
@@ -895,47 +1233,181 @@ void stopIncubationLocalOrRemote() {
   state.turningStatus    = "idle";
   state.ventForceEvalImmediate = true;
   saveSettingsToNVS();
+  triggerBuzzerCue(BZ_CUE_STOP);
+  showOledToast("SIKLUS BERHENTI", "Status: SIAGA");
   Serial.println("[INKUBASI] Siklus inkubasi DIHENTIKAN (Idle).");
 }
 
+void openConfirmDialog(bool isStartAction) {
+  confirmChoiceIdx = 0; // Selalu mulai di [ BATAL ] agar aman (wajib geser ke YA lalu tahan OK)
+  localUiMode      = isStartAction ? LOCAL_UI_CONFIRM_START : LOCAL_UI_CONFIRM_STOP;
+  localUiLastActMs = millis();
+}
+
+void executeMenuSelection(uint8_t itemIdx) {
+  localUiLastActMs = millis();
+  switch (itemIdx) {
+    case 0: // Langkah 1 -> Buka Verifikasi Langkah ke-2 (Mulai atau Hentikan)
+      if (state.incubationStatus == "running") {
+        openConfirmDialog(false);
+      } else {
+        openConfirmDialog(true);
+      }
+      break;
+
+    case 1: // Mode & Mute Buzzer (ROCK BEAT -> ROCK NADA -> MUTE)
+      if (state.buzzerMuted) {
+        state.buzzerStyle = 0;
+        setBuzzerMuted(false);
+        triggerBuzzerCue(BZ_CUE_CLICK);
+      } else if (state.buzzerStyle == 0) {
+        state.buzzerStyle = 1;
+        saveSettingsToNVS();
+        triggerBuzzerCue(BZ_CUE_CLICK);
+      } else {
+        setBuzzerMuted(true);
+      }
+      break;
+
+    case 2: // Tes Lagu Rock (Putar sampel riff lagu rock)
+      triggerBuzzerCue(BZ_CUE_PREVIEW_ROCK);
+      showOledToast("LAGU ROCK!", (state.buzzerStyle == 1) ? "Smoke On Water" : "We Will Rock U");
+      break;
+
+    case 3: // Tes Gerak Fisik Servo MG996R (0 -> 45 -> 90 -> kembali)
+      startServoHardwareTest();
+      showOledToast("TES SERVO", "Ayun 0-45-90 deg");
+      break;
+
+    case 4: // Pengaturan Kecerahan Layar OLED
+      state.oledBrightness = (state.oledBrightness + 1) % 3;
+      applyOledContrastSettings();
+      saveSettingsToNVS();
+      break;
+
+    case 5: // Tukar Posisi Layar OLED 1 <-> OLED 2
+      state.oledSwapScreens = !state.oledSwapScreens;
+      saveSettingsToNVS();
+      showOledToast("POSISI LAYAR", state.oledSwapScreens ? "Layar Ditukar" : "Layar Normal");
+      break;
+
+    case 6: // Nyalakan / Matikan Hotspot Captive Portal Setup Wi-Fi
+      if (portalActive) {
+        stopWifiPortal();
+        showOledToast("HOTSPOT OFF", "Mode WiFi Normal");
+      } else {
+        startWifiPortal();
+        localUiMode = LOCAL_UI_HOME;
+      }
+      break;
+
+    default: // Tutup Menu / Kembali
+      localUiMode = LOCAL_UI_HOME;
+      break;
+  }
+}
+
+void handleShortButtonClick() {
+  localUiLastActMs = millis();
+  triggerBuzzerCue(BZ_CUE_CLICK);
+
+  if (localUiMode == LOCAL_UI_TOAST) {
+    localUiMode = LOCAL_UI_HOME;
+    return;
+  }
+
+  if (localUiMode == LOCAL_UI_HOME) {
+    // Jika alarm sedang bunyi bising, arahkan kursor langsung ke menu Buzzer/Mute agar cepat dibisukan!
+    oledMenuCursor = (isAlarmConditionActive() && !state.buzzerMuted) ? 1 : 0;
+    localUiMode    = LOCAL_UI_MENU;
+    return;
+  }
+
+  if (localUiMode == LOCAL_UI_MENU) {
+    oledMenuCursor = (oledMenuCursor + 1) % OLED_MENU_COUNT;
+    return;
+  }
+
+  if (localUiMode == LOCAL_UI_CONFIRM_START || localUiMode == LOCAL_UI_CONFIRM_STOP) {
+    confirmChoiceIdx = (confirmChoiceIdx == 0) ? 1 : 0;
+    return;
+  }
+}
+
+void handleLongButtonHold() {
+  localUiLastActMs = millis();
+
+  if (localUiMode == LOCAL_UI_HOME) {
+    // Pintasan tahan tombol dari layar utama -> Masuk ke Verifikasi 2 Langkah Mulai / Berhenti
+    triggerBuzzerCue(BZ_CUE_CLICK);
+    openConfirmDialog(state.incubationStatus != "running");
+    return;
+  }
+
+  if (localUiMode == LOCAL_UI_MENU) {
+    triggerBuzzerCue(BZ_CUE_CLICK);
+    executeMenuSelection(oledMenuCursor);
+    return;
+  }
+
+  if (localUiMode == LOCAL_UI_CONFIRM_START) {
+    if (confirmChoiceIdx == 1) {
+      startIncubationLocalOrRemote();
+    } else {
+      triggerBuzzerCue(BZ_CUE_CLICK);
+      showOledToast("DIBATALKAN", "Belum Dimulai");
+    }
+    return;
+  }
+
+  if (localUiMode == LOCAL_UI_CONFIRM_STOP) {
+    if (confirmChoiceIdx == 1) {
+      stopIncubationLocalOrRemote();
+    } else {
+      triggerBuzzerCue(BZ_CUE_CLICK);
+      showOledToast("DIBATALKAN", "Tetap Berjalan");
+    }
+    return;
+  }
+}
+
 void pollPhysicalSwitches() {
-  // Mendukung Push Button Start di GPIO 26 (Hardware) maupun GPIO 4 (Simulasi/Alternatif)
+  // Mendukung Push Button di GPIO 26 (Hardware Utama) maupun GPIO 4 (Simulasi/Alternatif)
   bool pressed = (digitalRead(PIN_BTN_START) == LOW) || (digitalRead(PIN_BTN_START_ALT) == LOW);
   bool reading = pressed ? LOW : HIGH;
   unsigned long nowMs = millis();
+
+  // Auto-timeout kembali ke layar utama bila menu/konfirmasi tidak disentuh selama 15 detik
+  if (localUiMode == LOCAL_UI_TOAST && (nowMs - localToastStartMs >= LOCAL_TOAST_MS)) {
+    localUiMode = LOCAL_UI_HOME;
+  } else if (localUiMode != LOCAL_UI_HOME && localUiMode != LOCAL_UI_TOAST &&
+             stableBtnState == HIGH && (nowMs - localUiLastActMs >= LOCAL_UI_TIMEOUT_MS)) {
+    localUiMode = LOCAL_UI_HOME;
+  }
 
   if (reading != lastBtnReading) {
     lastBtnDebounceMs = nowMs;
   }
   lastBtnReading = reading;
 
-  if (nowMs - lastBtnDebounceMs > 50UL) {
+  if (nowMs - lastBtnDebounceMs > 40UL) {
     if (reading != stableBtnState) {
       stableBtnState = reading;
       if (stableBtnState == LOW) {
         btnPressStartMs     = nowMs;
         btnLongPressHandled = false;
+        localUiLastActMs    = nowMs;
       } else {
-        // Tekan singkat (< 2 detik) saat idle/finished -> Mulai inkubasi
-        if (!btnLongPressHandled && (nowMs - btnPressStartMs < 2000UL)) {
-          if (state.incubationStatus != "running") {
-            startIncubationLocalOrRemote();
-            digitalWrite(PIN_BUZZER_SFM27, HIGH);
-            delay(100);
-            digitalWrite(PIN_BUZZER_SFM27, LOW);
-          }
+        // Tombol dilepas sebelum mencapai batas tahan -> Klik Singkat (Geser / Buka Menu)
+        if (!btnLongPressHandled && (nowMs - btnPressStartMs < BTN_HOLD_CONFIRM_MS)) {
+          handleShortButtonClick();
         }
       }
     } else if (stableBtnState == LOW && !btnLongPressHandled) {
-      // Tekan tahan (>= 3 detik) saat running -> Hentikan inkubasi
-      if (nowMs - btnPressStartMs >= 3000UL) {
-        btnLongPressHandled = true;
-        if (state.incubationStatus == "running") {
-          stopIncubationLocalOrRemote();
-          digitalWrite(PIN_BUZZER_SFM27, HIGH);
-          delay(250);
-          digitalWrite(PIN_BUZZER_SFM27, LOW);
-        }
+      // Tombol ditahan >= 0.85 detik -> Eksekusi / Pilih (OK)
+      if (nowMs - btnPressStartMs >= BTN_HOLD_CONFIRM_MS) {
+        btnLongPressHandled = true; // Kunci sampai tombol dilepas agar tidak menembus step ke-2 otomatis!
+        handleLongButtonHold();
       }
     }
   }
@@ -1009,11 +1481,15 @@ void tampilOLED1(Adafruit_SSD1306& disp) {
   disp.clearDisplay();
   disp.setTextColor(SSD1306_WHITE);
 
-  // --- BARIS ATAS: IKON TERMO + JUDUL "Inkubator" + JAM WIB ---
+  // --- BARIS ATAS: IKON TERMO + JUDUL "Inkubator" + BADGE MUTE + JAM WIB ---
   disp.drawBitmap(2, 2, ICON_THERMO, 8, 12, SSD1306_WHITE);
   disp.setTextSize(1);
   disp.setCursor(14, 4);
-  disp.print("Inkubator");
+  if (state.buzzerMuted) {
+    disp.print("Inkubator[M]");
+  } else {
+    disp.print("Inkubator");
+  }
 
   char clockBuf[8];
   formatClockWib(getCurrentEpoch(), clockBuf, sizeof(clockBuf));
@@ -1274,6 +1750,140 @@ void tampilOLEDWifiFailed(Adafruit_SSD1306& disp) {
   disp.display();
 }
 
+// Menggambar bar progres saat tombol sedang ditahan menuju konfirmasi OK (0.85 detik)
+void drawButtonHoldProgress(Adafruit_SSD1306& disp) {
+  if (stableBtnState == LOW && !btnLongPressHandled) {
+    unsigned long heldMs = millis() - btnPressStartMs;
+    if (heldMs > 60UL) {
+      int w = (int)map((long)min(heldMs, BTN_HOLD_CONFIRM_MS), 0L, (long)BTN_HOLD_CONFIRM_MS, 0L, 124L);
+      disp.drawRect(0, 56, 128, 8, SSD1306_WHITE);
+      disp.fillRect(2, 58, w, 4, SSD1306_WHITE);
+      return;
+    }
+  }
+  disp.setTextSize(1);
+  disp.setCursor(2, 56);
+  disp.print("Klik:Geser  Tahan:OK");
+}
+
+String getOledMenuLabel(uint8_t idx) {
+  switch (idx) {
+    case 0:
+      return (state.incubationStatus == "running") ? "Hentikan Siklus" : "Mulai Inkubasi";
+    case 1:
+      if (state.buzzerMuted)        return "Buzzer: MUTE";
+      if (state.buzzerStyle == 1)   return "Buzzer: ROCK NADA";
+      return "Buzzer: ROCK BEAT";
+    case 2:
+      return "Tes Lagu Rock";
+    case 3:
+      return servoTestActive ? "Servo: Bergerak.." : "Tes Gerak Servo";
+    case 4:
+      if (state.oledBrightness == 0) return "OLED: Hemat Redup";
+      if (state.oledBrightness == 1) return "OLED: Cerah Sedang";
+      return "OLED: Cerah Penuh";
+    case 5:
+      return state.oledSwapScreens ? "Layar: Ditukar" : "Layar: Normal";
+    case 6:
+      return portalActive ? "Hotspot: AKTIF" : "Hotspot: Mati";
+    default:
+      return "<< Kembali";
+  }
+}
+
+void tampilOLEDMenu(Adafruit_SSD1306& disp) {
+  disp.clearDisplay();
+  disp.setTextColor(SSD1306_WHITE);
+  disp.setTextSize(1);
+
+  disp.setCursor(2, 2);
+  disp.printf("PENGATURAN OLED %d/%d", oledMenuCursor + 1, OLED_MENU_COUNT);
+  disp.drawFastHLine(0, 12, 128, SSD1306_WHITE);
+
+  // Tampilkan 3 item sekaligus agar baris lega dan mudah dibaca
+  int startIdx = (int)oledMenuCursor - 1;
+  if (startIdx < 0) startIdx = 0;
+  if (startIdx > (int)OLED_MENU_COUNT - 3) startIdx = (int)OLED_MENU_COUNT - 3;
+
+  for (int row = 0; row < 3; row++) {
+    int itemIdx = startIdx + row;
+    int y = 15 + (row * 13);
+    bool selected = (itemIdx == (int)oledMenuCursor);
+    if (selected) {
+      disp.fillRect(0, y - 1, 128, 11, SSD1306_WHITE);
+      disp.setTextColor(SSD1306_BLACK);
+      disp.setCursor(2, y);
+      disp.print("> ");
+    } else {
+      disp.setTextColor(SSD1306_WHITE);
+      disp.setCursor(2, y);
+      disp.print("  ");
+    }
+    disp.print(truncateText(getOledMenuLabel((uint8_t)itemIdx), 18));
+  }
+
+  disp.setTextColor(SSD1306_WHITE);
+  disp.drawFastHLine(0, 53, 128, SSD1306_WHITE);
+  drawButtonHoldProgress(disp);
+  disp.display();
+}
+
+void tampilOLEDConfirm(Adafruit_SSD1306& disp, bool isStartAction) {
+  disp.clearDisplay();
+  disp.setTextColor(SSD1306_WHITE);
+  disp.setTextSize(1);
+
+  disp.setCursor(2, 2);
+  disp.print(isStartAction ? "VERIFIKASI MULAI 2/2" : "VERIFIKASI STOP! 2/2");
+  disp.drawFastHLine(0, 12, 128, SSD1306_WHITE);
+
+  disp.setCursor(2, 16);
+  if (isStartAction) {
+    disp.print("Mulai siklus 21 hari?");
+  } else {
+    disp.printf("Hentikan H-%02d/21 skrg?", state.currentDay);
+  }
+
+  // Pilihan 0: BATAL | Pilihan 1: YA, KONFIRMASI
+  const char* opt0 = "[ BATAL / KEMBALI ]";
+  const char* opt1 = isStartAction ? "[ YA, MULAI SKRG! ]" : "[ YA, HENTIKAN! ]";
+
+  for (int i = 0; i < 2; i++) {
+    int y = 28 + (i * 12);
+    bool sel = ((int)confirmChoiceIdx == i);
+    if (sel) {
+      disp.fillRect(2, y - 1, 124, 11, SSD1306_WHITE);
+      disp.setTextColor(SSD1306_BLACK);
+    } else {
+      disp.setTextColor(SSD1306_WHITE);
+    }
+    disp.setCursor(6, y);
+    disp.print(sel ? "> " : "  ");
+    disp.print(i == 0 ? opt0 : opt1);
+  }
+
+  disp.setTextColor(SSD1306_WHITE);
+  drawButtonHoldProgress(disp);
+  disp.display();
+}
+
+void tampilOLEDToast(Adafruit_SSD1306& disp) {
+  disp.clearDisplay();
+  disp.setTextColor(SSD1306_WHITE);
+  disp.drawRoundRect(2, 4, 124, 56, 4, SSD1306_WHITE);
+  disp.setTextSize(1);
+  disp.setCursor(12, 14);
+  disp.print(truncateText(toastTitle, 18));
+  disp.drawFastHLine(8, 26, 112, SSD1306_WHITE);
+  disp.setCursor(10, 35);
+  disp.print(truncateText(toastSubtitle, 19));
+  if (servoTestActive) {
+    disp.setCursor(10, 47);
+    disp.printf("Sudut Servo: %d deg", lastServoHwAngle);
+  }
+  disp.display();
+}
+
 void updateOledDisplay() {
   if (!state.oledAvailable && !state.oled2Available) return;
 
@@ -1295,19 +1905,37 @@ void updateOledDisplay() {
     }
   };
 
-  // Jika kedua OLED terpasang (OLED-1 di GPIO 21/22 & OLED-2 di GPIO 16/17):
-  if (state.oledAvailable && state.oled2Available) {
-    tampilOLED1(oled);
-    if (wifiUiPhase == WIFI_UI_NORMAL) {
-      tampilOLED2(oled2);
+  auto renderInteractiveOrStatus = [&](Adafruit_SSD1306& disp) {
+    if (localUiMode == LOCAL_UI_MENU) {
+      tampilOLEDMenu(disp);
+    } else if (localUiMode == LOCAL_UI_CONFIRM_START) {
+      tampilOLEDConfirm(disp, true);
+    } else if (localUiMode == LOCAL_UI_CONFIRM_STOP) {
+      tampilOLEDConfirm(disp, false);
+    } else if (localUiMode == LOCAL_UI_TOAST) {
+      tampilOLEDToast(disp);
+    } else if (wifiUiPhase != WIFI_UI_NORMAL) {
+      renderActiveWifiScreen(disp);
     } else {
-      renderActiveWifiScreen(oled2);
+      tampilOLED2(disp);
     }
+  };
+
+  // Jika kedua OLED terpasang (mendukung opsi Tukar Layar 1 <-> 2):
+  if (state.oledAvailable && state.oled2Available) {
+    Adafruit_SSD1306& sensorDisp = state.oledSwapScreens ? oled2 : oled;
+    Adafruit_SSD1306& statusDisp = state.oledSwapScreens ? oled : oled2;
+    tampilOLED1(sensorDisp);
+    renderInteractiveOrStatus(statusDisp);
     return;
   }
 
-  // Jika hanya 1 OLED terpasang:
+  // Jika hanya 1 OLED terpasang: prioritaskan Menu / Verifikasi 2 Langkah saat sedang dibuka
   Adafruit_SSD1306& activeDisp = state.oledAvailable ? oled : oled2;
+  if (localUiMode != LOCAL_UI_HOME) {
+    renderInteractiveOrStatus(activeDisp);
+    return;
+  }
   if (wifiUiPhase == WIFI_UI_CONNECTING ||
       wifiUiPhase == WIFI_UI_CONNECTED_ANIM ||
       wifiUiPhase == WIFI_UI_FAILED_ANIM) {
@@ -1456,15 +2084,8 @@ void readSensorData() {
 // 14. GANTI WI-FI ANTI-PUTUS & HOTSPOT CAPTIVE PORTAL (192.168.4.1)
 // ============================================================================
 void beepWifiConnected() {
-  bool isTempAlarm = (state.temperature > TEMP_SAFE_MAX || state.temperature < TEMP_SAFE_MIN);
-  if (isTempAlarm || state.sensorError) return;
-
-  for (int i = 0; i < 2; i++) {
-    digitalWrite(PIN_BUZZER_SFM27, HIGH);
-    delay(70);
-    digitalWrite(PIN_BUZZER_SFM27, LOW);
-    if (i == 0) delay(60);
-  }
+  if (isAlarmConditionActive() || state.buzzerMuted) return;
+  triggerBuzzerCue(BZ_CUE_WIFI);
 }
 
 const char PORTAL_HTML[] PROGMEM =
@@ -2063,6 +2684,35 @@ void processIncomingCommand(JsonVariantConst cmdObj) {
       recordCommandResult(cmdId, "turning", action, false);
     }
   }
+  else if (target == "buzzer") {
+    String action = cmdObj["action"] | "";
+    if (action == "mute") {
+      setBuzzerMuted(true);
+      showOledToast("BUZZER: MUTE", "Dibisukan via Web");
+      recordCommandResult(cmdId, "buzzer", "mute", true);
+    } else if (action == "unmute") {
+      setBuzzerMuted(false);
+      triggerBuzzerCue(BZ_CUE_CLICK);
+      showOledToast("BUZZER: AKTIF", "Lagu Rock Siap!");
+      recordCommandResult(cmdId, "buzzer", "unmute", true);
+    } else if (action == "test_rock") {
+      triggerBuzzerCue(BZ_CUE_PREVIEW_ROCK);
+      showOledToast("TES LAGU ROCK", "Dipicu dari Web");
+      recordCommandResult(cmdId, "buzzer", "test_rock", true);
+    } else if (action == "style_beat") {
+      state.buzzerStyle = 0;
+      setBuzzerMuted(false);
+      triggerBuzzerCue(BZ_CUE_PREVIEW_ROCK);
+      recordCommandResult(cmdId, "buzzer", "style_beat", true);
+    } else if (action == "style_tone") {
+      state.buzzerStyle = 1;
+      setBuzzerMuted(false);
+      triggerBuzzerCue(BZ_CUE_PREVIEW_ROCK);
+      recordCommandResult(cmdId, "buzzer", "style_tone", true);
+    } else {
+      recordCommandResult(cmdId, "buzzer", action, false);
+    }
+  }
 }
 
 void processIncomingSettings(JsonVariantConst settingsObj) {
@@ -2198,6 +2848,10 @@ void sendTelemetryAndPollBackend() {
   wifi["connected"] = true;
   wifi["ssid"]      = WiFi.SSID();
   wifi["rssi"]      = WiFi.RSSI();
+
+  JsonObject bz = doc["buzzer"].to<JsonObject>();
+  bz["muted"] = state.buzzerMuted;
+  bz["style"] = (state.buzzerStyle == 1) ? "rock_tone" : "rock_beat";
 
   if (state.lastCmdId > 0) {
     JsonObject lastCmd = doc["last_command"].to<JsonObject>();
@@ -2493,20 +3147,16 @@ void setup() {
   state.rtcAvailable = rtc.begin(&Wire);
   Serial.printf("[I2C-1] RTC    (0x68): %s\n", state.rtcAvailable ? "OK" : "TIDAK TERDETEKSI");
 
-  // 3. Inisialisasi Servo MG996R (GPIO 18)
-  // Alokasikan timer LEDC secara eksplisit agar servo dapat channel PWM yang valid
-  ESP32PWM::allocateTimer(0);
-  ESP32PWM::allocateTimer(1);
-  ESP32PWM::allocateTimer(2);
-  ESP32PWM::allocateTimer(3);
-  mg996rServo.setPeriodHertz(50);
-  mg996rServo.attach(PIN_SERVO_MG996R, SERVO_PULSE_MIN_US, SERVO_PULSE_MAX_US);
-  Serial.printf("[SERVO] Attach GPIO %d: %s\n", PIN_SERVO_MG996R, mg996rServo.attached() ? "OK" : "GAGAL");
-  // Uji gerak singkat saat boot (0 -> 45 -> posisi tersimpan) untuk verifikasi hardware
+  // Terapkan tingkat kecerahan OLED tersimpan
+  applyOledContrastSettings();
+
+  // 3. Inisialisasi Servo MG996R (GPIO 18) via Hardware LEDC 14-bit langsung (bebas bug Core 3.x)
+  initServoHardware();
   int savedVentAngle = state.ventAngle;
-  mg996rServo.write(0);   delay(400);
-  mg996rServo.write(45);  delay(400);
-  state.ventAngle = -1;  // paksa log & tulis ulang
+  writeServoRawAngle(0);   delay(350);
+  writeServoRawAngle(45);  delay(350);
+  writeServoRawAngle(90);  delay(350);
+  state.ventAngle = -1; // paksa log & tulis ulang posisi awal
   applyVentilationOutput(savedVentAngle);
 
   // 4. Inisialisasi RobotDyn AC Dimmer (Z-C = GPIO 34, DIM = GPIO 25)
@@ -2583,15 +3233,19 @@ void loop() {
   // 1. Layani Hotspot Captive Portal, transisi Wi-Fi, & animasi state
   handleWifiPortalAndState();
 
-  // 2. Cek Push Button Start (GPIO 26) & Buzzer (GPIO 19)
+  // 2. Cek Push Button (Menu & Verifikasi 2 Langkah), Gerak Servo (Turning/Tes), & Buzzer Lagu Rock
   pollPhysicalSwitches();
+  updateServoMotions();
   updateBuzzerAlarm();
 
   // 3. Terapkan respons perintah/setting dari Backend bila Core 0 sudah selesai mengirim
   applyPendingNetworkResult();
 
-  // 4. Refresh tampilan OLED (250 ms saat animasi/portal, 1 detik saat normal)
-  unsigned long oledInterval = (wifiUiPhase != WIFI_UI_NORMAL) ? OLED_ANIM_INTERVAL_MS : OLED_UPDATE_INTERVAL_MS;
+  // 4. Refresh tampilan OLED (60 ms saat tombol ditekan/menu/konfirmasi, 250 ms animasi Wi-Fi, 1s normal)
+  bool fastUiActive = (localUiMode != LOCAL_UI_HOME) || (stableBtnState == LOW) || servoTestActive;
+  unsigned long oledInterval = fastUiActive
+    ? 60UL
+    : ((wifiUiPhase != WIFI_UI_NORMAL) ? OLED_ANIM_INTERVAL_MS : OLED_UPDATE_INTERVAL_MS);
   if (nowMs - lastOledMillis >= oledInterval) {
     lastOledMillis = nowMs;
     updateOledDisplay();

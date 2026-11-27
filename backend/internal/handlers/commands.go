@@ -145,6 +145,22 @@ func validateCommand(snap models.TelemetryResponse, req models.CommandRequest) (
 		}
 		return 0, "turn_now", "Pembalikan telur manual dipicu (turn_now)", ""
 
+	case "buzzer":
+		switch req.Action {
+		case "mute":
+			return 0, "mute", "Alarm buzzer dibisukan (Mute)", ""
+		case "unmute":
+			return 0, "unmute", "Alarm buzzer diaktifkan kembali (Unmute)", ""
+		case "test_rock":
+			return 0, "test_rock", "Tes lagu rock buzzer dipicu", ""
+		case "style_beat":
+			return 0, "style_beat", "Gaya lagu buzzer diubah ke Rock Beat (We Will Rock You)", ""
+		case "style_tone":
+			return 0, "style_tone", "Gaya lagu buzzer diubah ke Rock Nada (Smoke on the Water)", ""
+		default:
+			return fiber.StatusBadRequest, "", "", "Aksi buzzer tidak dikenali (gunakan 'mute', 'unmute', 'test_rock', 'style_beat', atau 'style_tone')."
+		}
+
 	default:
 		return fiber.StatusBadRequest, "", "", "Target perintah tidak dikenali."
 	}

@@ -52,12 +52,12 @@ Library berikut **tidak perlu dicari di Library Manager** karena sudah langsung 
 |---|---|---|---|
 | **GPIO 16 (RX2)** | Jalur SDA2 I2C-2 (OLED-2) | `I2C_Dua.begin(16, 17)` | Jalur data khusus **OLED-2 (`0x3C`)** (Status Wi-Fi dBm, `SETTER`/`LOCKDOWN`, `DAY XX/21`, Waktu Mulai). |
 | **GPIO 17 (TX2)** | Jalur SCL2 I2C-2 (OLED-2) | `I2C_Dua.begin(16, 17)` | Jalur clock khusus **OLED-2 (`0x3C`)**. |
-| **GPIO 18** | Signal Servo MG996R (1 Unit) | `mg996rServo.attach(18, 500, 2500)` | Mengatur sudut bukaan `0°` (tutup) s/d `90°` (buka penuh) secara otomatis (Fuzzy) atau manual. Catu daya `+5V` minimal **3 A** + kapasitor **470–1000 µF** (arus stall ~2.5 A). |
-| **GPIO 19** | Buzzer Aktif SFM-27 (+) | `OUTPUT` | Berbunyi *beep-beep* intermiten (300ms ON / 700ms OFF) saat suhu di luar batas aman (`< 36.5°C` atau `> 38.5°C`) atau sensor error. |
-| **GPIO 21** | Jalur SDA1 I2C-1 Bersama | `Wire.begin(21, 22)` | Terhubung paralel ke **SHT30 (`0x44`)**, **OLED-1 (`0x3C`)** (Suhu, Ikon Telur, Kelembapan, Jam), dan **RTC DS3231 (`0x68`)**. |
+| **GPIO 18** | Signal Servo MG996R (1 Unit) | `ledcAttachChannel(18, 50, 14, 2)` | PWM Hardware 14-bit 50 Hz (`500–2500 µs`): mengatur sudut bukaan ventilasi `0°–90°` sekaligus mengayun halus saat pembalikan telur (`turning`). Wajib catu `+5V` **≥ 3 A**, kapasitor **470–1000 µF**, & satukan `GND` adaptor ke `GND` ESP32. |
+| **GPIO 19** | Buzzer SFM-27 (+) | `OUTPUT` / LEDC Ch 4 | Memainkan irama lagu rock non-blocking (**Queen - *We Will Rock You*** / **Deep Purple - *Smoke on the Water***) saat suhu di luar batas aman, dilengkapi fitur **Mute (Bisukan)** dari menu OLED maupun Web. |
+| **GPIO 21** | Jalur SDA1 I2C-1 Bersama | `Wire.begin(21, 22)` | Terhubung paralel ke **SHT30 (`0x44`)**, **OLED-1 (`0x3C`)** (Suhu, Ikon Telur, Kelembapan, Badge `[M]` Mute, Jam), dan **RTC DS3231 (`0x68`)**. |
 | **GPIO 22** | Jalur SCL1 I2C-1 Bersama | `Wire.begin(21, 22)` | Jalur clock I2C-1 untuk ketiga modul di atas. |
 | **GPIO 25** | PWM / DIM RobotDyn AC Dimmer | `OUTPUT` (Pulsa Gate Triac) | Mengirimkan pulsa pemicu $200\ \mu\text{s}$ lewat timer tick $100\ \mu\text{s}$ setelah jeda sudut fasa (*phase-cut*) tercapai. |
-| **GPIO 26 / GPIO 4** | Push Button Start (1 Unit) | `INPUT_PULLUP` (Aktif `LOW`) | Mendukung **`GPIO 26`** (wiring utama) maupun **`GPIO 4`** (simulasi).<br>**Tekan singkat (< 2 detik):** Mulai siklus inkubasi 21 hari (`DAY 01/21`).<br>**Tekan tahan ($\ge$ 3 detik):** Hentikan/reset siklus ke `idle`. |
+| **GPIO 26 / GPIO 4** | Push Button Interaktif (1 Unit) | `INPUT_PULLUP` (Aktif `LOW`) | **Klik singkat (`< 0.85s`):** Buka/geser **Menu Pengaturan OLED**.<br>**Tahan (`≥ 0.85s`):** Pilih menu / buka **Verifikasi 2 Langkah (`2/2`)** sebelum Mulai atau Hentikan siklus inkubasi. |
 | **GPIO 34** | Z-C RobotDyn AC Dimmer | `INPUT` + `attachInterrupt(RISING)` | Mendeteksi titik *Zero-Crossing* gelombang AC 50Hz setiap $10\ \text{ms}$ ($10.000\ \mu\text{s}$). |
 
 ---

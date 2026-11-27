@@ -65,6 +65,7 @@
   let inc = $derived(data?.incubation ?? { status: 'idle', stage: null });
   let turning = $derived(data?.turning ?? { status: 'idle' });
   let motor = $derived(data?.motor ?? { running: false, encoder_ok: true });
+  let buzzer = $derived(data?.buzzer ?? { muted: false, style: 'rock_beat' });
   let sp = $derived(statusPutar[turning.status] ?? statusPutar.idle);
 
   // Alasan tombol "Balik sekarang" tidak bisa dipakai (kosong = boleh)
@@ -168,22 +169,78 @@
     </section>
   </div>
 
-  <!-- PEMBALIKAN TELUR -->
-  <h2 class="mt-6 text-lg font-semibold">Pembalikan telur</h2>
-  <section class="mt-2 kartu p-4 md:max-w-md">
-    <div class="flex items-center justify-between gap-2">
-      <p class="text-sm text-mute">Semua telur dibalik bersamaan.</p>
-      <StatusBadge tone={sp.tone} icon={sp.icon} label={sp.label} />
-    </div>
-    <button type="button" disabled={!!alasanBalik || sibuk.turning}
-      onclick={() => kirim('turning', { target: 'turning', action: 'turn_now' })}
-      class="mt-3 w-full tombol">
-      {sibuk.turning ? 'Mengirim…' : 'Balik sekarang'}
-    </button>
-    {#if alasanBalik}<p class="mt-2 text-sm text-mute">Tidak tersedia: {alasanBalik}.</p>{/if}
-    {#if hasil.turning}
-      {#if hasil.turning.ok}<div class="mt-2"><StatusPerintah id={hasil.turning.id} /></div>
-      {:else}<p role="alert" class="mt-2 text-sm text-bad"><Ikon nama="bahaya" /> {hasil.turning.teks}</p>{/if}
-    {/if}
-  </section>
+  <!-- PEMBALIKAN TELUR & ALARM BUZZER ROCK -->
+  <div class="mt-6 grid gap-4 md:grid-cols-2">
+    <section class="kartu p-4">
+      <h2 class="text-lg font-semibold">Pembalikan telur</h2>
+      <div class="mt-1.5 flex items-center justify-between gap-2">
+        <p class="text-sm text-mute">Semua telur dibalik bersamaan dengan gerak servo MG996R.</p>
+        <StatusBadge tone={sp.tone} icon={sp.icon} label={sp.label} />
+      </div>
+      <button type="button" disabled={!!alasanBalik || sibuk.turning}
+        onclick={() => kirim('turning', { target: 'turning', action: 'turn_now' })}
+        class="mt-3 w-full tombol">
+        {sibuk.turning ? 'Mengirim…' : 'Balik sekarang'}
+      </button>
+      {#if alasanBalik}<p class="mt-2 text-sm text-mute">Tidak tersedia: {alasanBalik}.</p>{/if}
+      {#if hasil.turning}
+        {#if hasil.turning.ok}<div class="mt-2"><StatusPerintah id={hasil.turning.id} /></div>
+        {:else}<p role="alert" class="mt-2 text-sm text-bad"><Ikon nama="bahaya" /> {hasil.turning.teks}</p>{/if}
+      {/if}
+    </section>
+
+    <section class="kartu p-4">
+      <div class="flex items-center justify-between gap-2">
+        <h2 class="text-lg font-semibold">Alarm Buzzer (Lagu Rock)</h2>
+        {#if buzzer.muted}
+          <StatusBadge tone="warn" icon="🔇" label="Dibisukan (Mute)" />
+        {:else}
+          <StatusBadge tone="ok" icon="🎸" label={buzzer.style === 'rock_tone' ? 'Rock Nada' : 'Rock Beat'} />
+        {/if}
+      </div>
+      <p class="mt-1.5 text-sm text-mute">
+        Buzzer memainkan irama lagu rock saat suhu di luar batas aman, dan dapat dibisukan kapan saja dari Web maupun menu OLED alat.
+      </p>
+
+      <div class="mt-3 flex flex-wrap gap-2">
+        {#if buzzer.muted}
+          <button type="button" disabled={terkunci || sibuk.buzzer}
+            onclick={() => kirim('buzzer', { target: 'buzzer', action: 'unmute' })}
+            class="tombol">
+            {sibuk.buzzer ? 'Mengirim…' : 'Aktifkan Suara'}
+          </button>
+        {:else}
+          <button type="button" disabled={terkunci || sibuk.buzzer}
+            onclick={() => kirim('buzzer', { target: 'buzzer', action: 'mute' })}
+            class="tombol tombol-garis-bahaya">
+            {sibuk.buzzer ? 'Mengirim…' : 'Bisukan Buzzer (Mute)'}
+          </button>
+        {/if}
+
+        <button type="button" disabled={terkunci || sibuk.buzzer}
+          onclick={() => kirim('buzzer', { target: 'buzzer', action: 'test_rock' })}
+          class="tombol tombol-sekunder">
+          Tes Lagu Rock
+        </button>
+      </div>
+
+      <div class="mt-3 flex flex-wrap gap-2 text-xs">
+        <button type="button" disabled={terkunci || sibuk.buzzer}
+          onclick={() => kirim('buzzer', { target: 'buzzer', action: 'style_beat' })}
+          class="rounded-lg border px-2.5 py-1.5 {buzzer.style !== 'rock_tone' ? 'border-ember bg-ember/15 text-ember2 font-semibold' : 'border-line text-mute'}">
+          Gaya 1: We Will Rock You (Beat)
+        </button>
+        <button type="button" disabled={terkunci || sibuk.buzzer}
+          onclick={() => kirim('buzzer', { target: 'buzzer', action: 'style_tone' })}
+          class="rounded-lg border px-2.5 py-1.5 {buzzer.style === 'rock_tone' ? 'border-ember bg-ember/15 text-ember2 font-semibold' : 'border-line text-mute'}">
+          Gaya 2: Smoke on the Water (Nada)
+        </button>
+      </div>
+
+      {#if hasil.buzzer}
+        {#if hasil.buzzer.ok}<div class="mt-2"><StatusPerintah id={hasil.buzzer.id} /></div>
+        {:else}<p role="alert" class="mt-2 text-sm text-bad"><Ikon nama="bahaya" /> {hasil.buzzer.teks}</p>{/if}
+      {/if}
+    </section>
+  </div>
 {/if}

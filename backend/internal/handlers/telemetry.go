@@ -303,6 +303,14 @@ func (h *TelemetryHandler) IngestDeviceTelemetry(c fiber.Ctx) error {
 		})
 	}
 
+	if p.Buzzer != nil {
+		bzStyle := defaultIfEmpty(strings.TrimSpace(p.Buzzer.Style), "rock_beat")
+		_, _ = h.db.Exec(
+			`UPDATE device_state SET buzzer_muted = ?, buzzer_style = ? WHERE device_id = ?`,
+			p.Buzzer.Muted, bzStyle, deviceID,
+		)
+	}
+
 	_, _ = h.db.Exec(
 		`INSERT INTO telemetry_history (device_id, temperature, humidity, lamp_intensity, vent_angle, recorded_at)
 		 VALUES (?, ?, ?, ?, ?, ?)`,
@@ -577,7 +585,8 @@ func GetDeviceSnapshot(db *sql.DB, cfg *config.Config) (models.TelemetryResponse
 		        vent_mode, vent_angle, vent_fuzzy_active,
 		        motor_running, motor_encoder_ok, turning_status,
 		        last_turned_at, next_turning_at,
-		        wifi_connected, wifi_ssid, wifi_rssi
+		        wifi_connected, wifi_ssid, wifi_rssi,
+		        buzzer_muted, buzzer_style
 		 FROM device_state WHERE device_id = ? LIMIT 1`,
 		cfg.DeviceID,
 	).Scan(
@@ -591,6 +600,7 @@ func GetDeviceSnapshot(db *sql.DB, cfg *config.Config) (models.TelemetryResponse
 		&resp.Motor.Running, &resp.Motor.EncoderOK, &resp.Turning.Status,
 		&lastTurned, &nextTurning,
 		&resp.Wifi.Connected, &resp.Wifi.SSID, &wifiRSSI,
+		&resp.Buzzer.Muted, &resp.Buzzer.Style,
 	)
 	if err != nil {
 		return resp, true, err

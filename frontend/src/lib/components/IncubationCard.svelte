@@ -12,6 +12,7 @@
   const tahap = { turning: 'Masa pembalikan telur', lockdown: 'Lockdown, persiapan menetas' };
 
   let konfirmasi = $state(false);
+  let konfirmasiMulai = $state(false);
   let total = $derived(inc.total_days ?? 21);
   let sisa = $derived(inc.finish_at ? Math.round((new Date(inc.finish_at).getTime() - now) / 1000) : 0);
   let hari = $derived(inc.current_day ?? (inc.started_at ? Math.min(hariKe(inc.started_at, now), total) : 0));
@@ -31,6 +32,11 @@
   function berhenti() {
     konfirmasi = false;
     onkirim('stop');
+  }
+
+  function mulaiSekarang() {
+    konfirmasiMulai = false;
+    onkirim('start');
   }
 </script>
 
@@ -95,8 +101,17 @@
       <button type="button" onclick={() => (konfirmasi = true)} disabled={terkunci || sibuk} class="tombol tombol-garis-bahaya w-full sm:w-auto">
         {sibuk ? 'Mengirim…' : 'Berhenti'}
       </button>
+    {:else if konfirmasiMulai}
+      <div class="rounded-xl border border-ember/60 bg-ember/10 p-3 text-sm text-ink">
+        <p class="font-medium"><Ikon nama="info" /> Konfirmasi mulai siklus inkubasi 21 hari?</p>
+        <p class="mt-1 text-mute">Pastikan rak telur sudah terisi dan wadah air kelembapan sudah siap. Hari ke-1 akan dimulai sekarang.</p>
+        <div class="mt-3 grid grid-cols-2 gap-2 sm:flex">
+          <button type="button" onclick={mulaiSekarang} class="tombol">Ya, mulai sekarang</button>
+          <button type="button" onclick={() => (konfirmasiMulai = false)} class="tombol tombol-sekunder">Batal</button>
+        </div>
+      </div>
     {:else}
-      <button type="button" onclick={() => onkirim('start')} disabled={terkunci || sibuk} class="tombol w-full sm:w-auto">
+      <button type="button" onclick={() => (konfirmasiMulai = true)} disabled={terkunci || sibuk} class="tombol w-full sm:w-auto">
         {sibuk ? 'Mengirim…' : inc.status === 'finished' ? 'Mulai inkubasi baru' : 'Mulai'}
       </button>
     {/if}

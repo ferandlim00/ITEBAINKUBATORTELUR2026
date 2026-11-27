@@ -58,6 +58,12 @@ type WifiState struct {
 	RSSI      *int   `json:"rssi"`
 }
 
+// BuzzerState models active alarm buzzer mute and rock melody style.
+type BuzzerState struct {
+	Muted bool   `json:"muted"`
+	Style string `json:"style"`
+}
+
 // LastCommandInfo models the execution status of the latest command on ESP32.
 type LastCommandInfo struct {
 	ID        int64  `json:"id"`
@@ -83,6 +89,7 @@ type TelemetryResponse struct {
 	Motor             MotorState       `json:"motor"`
 	Turning           TurningState     `json:"turning"`
 	Wifi              WifiState        `json:"wifi"`
+	Buzzer            BuzzerState      `json:"buzzer"`
 	LastCommand       *LastCommandInfo `json:"last_command"`
 }
 
@@ -101,6 +108,7 @@ type DeviceTelemetryPayload struct {
 	Motor             MotorState       `json:"motor"`
 	Turning           TurningState     `json:"turning"`
 	Wifi              WifiState        `json:"wifi"`
+	Buzzer            *BuzzerState     `json:"buzzer,omitempty"`
 	LastCommand       *LastCommandInfo `json:"last_command"`
 	ActiveAlerts      []AlertItem      `json:"active_alerts"`
 }

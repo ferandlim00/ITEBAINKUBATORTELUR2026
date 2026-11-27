@@ -31,7 +31,7 @@ async function request(path, options = {}) {
 export const mockScenario = { value: 'normal' };
 
 // Perintah dari halaman Kontrol/Dashboard disimpan di sini, supaya data dummy ikut berubah (hanya mode mock)
-const mockOverride = { lamp: null, ventilation: null, incubation: null, turn: false };
+const mockOverride = { lamp: null, ventilation: null, incubation: null, turn: false, buzzer: null };
 let mockLast = null; // last_command: dispatched -> executed/failed
 let skenarioTerakhir = 'normal';
 
@@ -82,6 +82,7 @@ export async function getTelemetry() {
     if (mockOverride.lamp) hasil.lamp = { ...hasil.lamp, ...mockOverride.lamp, fuzzy_active: mockOverride.lamp.mode === 'auto' };
     if (mockOverride.ventilation) hasil.ventilation = { ...hasil.ventilation, ...mockOverride.ventilation, fuzzy_active: false };
     if (mockOverride.incubation) hasil.incubation = { ...hasil.incubation, ...mockOverride.incubation };
+    if (mockOverride.buzzer) hasil.buzzer = { ...hasil.buzzer, ...mockOverride.buzzer };
     if (mockOverride.turn) {
       hasil.turning = { ...hasil.turning, status: 'turning' };
       hasil.motor = { ...hasil.motor, running: true };
@@ -159,6 +160,12 @@ export async function sendCommand(command) {
     if (command.target === 'turning') {
       mockOverride.turn = true; // motor "berputar" 8 detik, lalu kembali menunggu jadwal
       setTimeout(() => { mockOverride.turn = false; }, 8000);
+    }
+    if (command.target === 'buzzer') {
+      if (command.action === 'mute') mockOverride.buzzer = { ...(mockOverride.buzzer ?? { style: 'rock_beat' }), muted: true };
+      else if (command.action === 'unmute') mockOverride.buzzer = { ...(mockOverride.buzzer ?? { style: 'rock_beat' }), muted: false };
+      else if (command.action === 'style_beat') mockOverride.buzzer = { muted: false, style: 'rock_beat' };
+      else if (command.action === 'style_tone') mockOverride.buzzer = { muted: false, style: 'rock_tone' };
     }
     if (command.target === 'incubation') {
       const sekarang = Date.now();
