@@ -4,7 +4,7 @@
  * (Tanpa Library Tambahan - Compile Cepat & Kompatibel ESP32 Core 2.x / 3.x)
  * ============================================================================
  * Kabel Servo MG996R:
- *   - Oranye / Kuning (Signal) -> GPIO 18 ESP32
+ *   - Oranye / Kuning (Signal) -> GPIO 23 ESP32
  *   - Merah (VCC)              -> +5V Power Supply Eksternal (Min. 2A - 3A)
  *   - Cokelat / Hitam (GND)    -> GND Power Supply DAN WAJIB nyambung ke GND ESP32!
  *
@@ -20,9 +20,9 @@
 #include <Arduino.h>
 #include <esp_arduino_version.h>
 
-#define PIN_SERVO           18    // Pin Signal Servo MG996R (bisa diganti jika tes pin lain)
-#define SERVO_PULSE_MIN_US  500   // 0 derajat   (500 us)
-#define SERVO_PULSE_MAX_US  2500  // 180 derajat (2500 us)
+#define PIN_SERVO           23    // Pin Signal Servo MG996R (bisa diganti jika tes pin lain)
+#define SERVO_PULSE_MIN_US  1000  // 0 derajat   (1000 us)
+#define SERVO_PULSE_MAX_US  2000  // 180 derajat (2000 us)
 #define SERVO_LEDC_CHANNEL  2
 #define SERVO_LEDC_BITS     14    // Resolusi 14-bit (16.384 step per 20.000 us)
 
@@ -47,7 +47,7 @@ void setServoAngle(int angleDeg) {
 void setup() {
   Serial.begin(115200);
   delay(400);
-  Serial.println("\n=== UJI FISIK SERVO MG996R (GPIO 18) ===");
+  Serial.println("\n=== UJI FISIK SERVO MG996R (GPIO 23) ===");
 
 #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
   bool ok = ledcAttachChannel(PIN_SERVO, 50, SERVO_LEDC_BITS, SERVO_LEDC_CHANNEL);

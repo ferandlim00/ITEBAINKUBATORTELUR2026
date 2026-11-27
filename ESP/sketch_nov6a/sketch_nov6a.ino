@@ -6,7 +6,7 @@
  * Mapping Pin Hardware (Sesuai Dokumen Spesifikasi Final & Dual OLED):
  *   - GPIO 16 : Jalur SDA2 I2C-2 Khusus OLED-2 SSD1306 [0x3C] (Pin RX2)
  *   - GPIO 17 : Jalur SCL2 I2C-2 Khusus OLED-2 SSD1306 [0x3C] (Pin TX2)
- *   - GPIO 18 : Signal Motor Servo MG996R (1 Unit) -> Catu daya +5V TB-1512
+ *   - GPIO 23 : Signal Motor Servo MG996R (1 Unit) -> Catu daya +5V TB-1512
  *   - GPIO 19 : Positif (+) Buzzer Aktif SFM-27
  *   - GPIO 21 : Jalur SDA1 I2C-1 (SHT30 [0x44], OLED-1 SSD1306 [0x3C], RTC DS3231 [0x68])
  *   - GPIO 22 : Jalur SCL1 I2C-1 (SHT30 [0x44], OLED-1 SSD1306 [0x3C], RTC DS3231 [0x68])
@@ -56,7 +56,7 @@
 // ============================================================================
 #define PIN_I2C2_SDA        16  // RX2 - SDA Bus I2C-2 Khusus OLED-2 (0x3C)
 #define PIN_I2C2_SCL        17  // TX2 - SCL Bus I2C-2 Khusus OLED-2 (0x3C)
-#define PIN_SERVO_MG996R     18  // Signal Motor Servo MG996R (1 Unit)
+#define PIN_SERVO_MG996R     23  // Signal Motor Servo MG996R (1 Unit)
 #define PIN_BUZZER_SFM27    19  // Positif (+) Buzzer Aktif SFM-27
 #define PIN_I2C_SDA         21  // SDA Bus I2C-1 (SHT30, OLED-1, RTC)
 #define PIN_I2C_SCL         22  // SCL Bus I2C-1 (SHT30, OLED-1, RTC)
@@ -65,12 +65,12 @@
 #define PIN_BTN_START_ALT   4   // Push Button Start Alternatif/Simulasi (INPUT_PULLUP)
 #define PIN_DIMMER_ZC       34  // Input Zero-Cross Detector RobotDyn AC Dimmer
 
-// Lebar pulsa Servo MG996R (standar 50 Hz: 500 us = 0 deg, 2500 us = 180 deg)
+// Lebar pulsa Servo MG996R (rentang aman 50 Hz: 1000 us = 0 deg, 2000 us = 180 deg)
 // Menggunakan Hardware LEDC 14-bit langsung (Channel 2 / Timer 1) agar bebas bug double-attach ESP32Servo di Core 3.x.
 // Catatan daya: MG996R menarik arus hingga ~2.5 A saat stall (4.8-6.6 V), WAJIB pakai
 // catu +5V TB-1512 minimal 3 A + kapasitor 470-1000 uF + satukan GND adaptor servo ke GND ESP32.
-#define SERVO_PULSE_MIN_US   500
-#define SERVO_PULSE_MAX_US   2500
+#define SERVO_PULSE_MIN_US   1000
+#define SERVO_PULSE_MAX_US   2000
 #define SERVO_LEDC_CHANNEL   2
 #define SERVO_LEDC_BITS      14
 #define BUZZER_LEDC_CHANNEL  4
@@ -278,7 +278,7 @@ struct IncubatorState {
   bool   lampSeedOnFirstAuto = true;
   bool   lampFuzzyActive     = true;
 
-  // Ventilasi (Motor Servo MG996R GPIO 18 - 4 Mode Otomatis Bertahap / Manual)
+  // Ventilasi (Motor Servo MG996R GPIO 23 - 4 Mode Otomatis Bertahap / Manual)
   String ventMode                = "auto"; // "auto" | "manual"
   int    ventAngle               = 15;     // 0..90 derajat
   int    ventDiscreteMode        = 1;      // 0=Tutup(0°), 1=Oksigen(15°), 2=Sirkulasi(40°), 3=Darurat(90°)
@@ -504,7 +504,7 @@ void saveSettingsToNVS() {
 }
 
 // ============================================================================
-// 9. AKTUATOR: SERVO MG996R LEDC 14-BIT (GPIO 18), BUZZER LAGU ROCK + MUTE (GPIO 19)
+// 9. AKTUATOR: SERVO MG996R LEDC 14-BIT (GPIO 23), BUZZER LAGU ROCK + MUTE (GPIO 19)
 // ============================================================================
 bool          servoHwReady        = false;
 int           lastServoHwAngle    = -1;
@@ -3184,7 +3184,7 @@ void setup() {
   // Terapkan tingkat kecerahan OLED tersimpan
   applyOledContrastSettings();
 
-  // 3. Inisialisasi Servo MG996R (GPIO 18) via Hardware LEDC 14-bit langsung (bebas bug Core 3.x)
+  // 3. Inisialisasi Servo MG996R (GPIO 23) via Hardware LEDC 14-bit langsung (bebas bug Core 3.x)
   initServoHardware();
   int savedVentAngle = state.ventAngle;
   writeServoRawAngle(0);   delay(350);
