@@ -1,12 +1,12 @@
 /**
  * ============================================================================
  * SMART HATCHERY MONITORING - FIRMWARE ESP32 DOIT DEVKIT V1 (30-PIN)
- * (Revisi Final: Tanpa Motor Stepper, 1 Servo MG90S, & 1 Push Button Start)
+ * (Revisi Final: Tanpa Motor Stepper, 1 Servo MG996R, & 1 Push Button Start)
  * ============================================================================
  * Mapping Pin Hardware (Sesuai Dokumen Spesifikasi Final & Dual OLED):
  *   - GPIO 16 : Jalur SDA2 I2C-2 Khusus OLED-2 SSD1306 [0x3C] (Pin RX2)
  *   - GPIO 17 : Jalur SCL2 I2C-2 Khusus OLED-2 SSD1306 [0x3C] (Pin TX2)
- *   - GPIO 18 : Signal Motor Servo MG90S (1 Unit) -> Catu daya +5V TB-1512
+ *   - GPIO 18 : Signal Motor Servo MG996R (1 Unit) -> Catu daya +5V TB-1512
  *   - GPIO 19 : Positif (+) Buzzer Aktif SFM-27
  *   - GPIO 21 : Jalur SDA1 I2C-1 (SHT30 [0x44], OLED-1 SSD1306 [0x3C], RTC DS3231 [0x68])
  *   - GPIO 22 : Jalur SCL1 I2C-1 (SHT30 [0x44], OLED-1 SSD1306 [0x3C], RTC DS3231 [0x68])
@@ -56,7 +56,7 @@
 // ============================================================================
 #define PIN_I2C2_SDA        16  // RX2 - SDA Bus I2C-2 Khusus OLED-2 (0x3C)
 #define PIN_I2C2_SCL        17  // TX2 - SCL Bus I2C-2 Khusus OLED-2 (0x3C)
-#define PIN_SERVO_MG90S     18  // Signal Motor Servo MG90S (1 Unit)
+#define PIN_SERVO_MG996R     18  // Signal Motor Servo MG996R (1 Unit)
 #define PIN_BUZZER_SFM27    19  // Positif (+) Buzzer Aktif SFM-27
 #define PIN_I2C_SDA         21  // SDA Bus I2C-1 (SHT30, OLED-1, RTC)
 #define PIN_I2C_SCL         22  // SCL Bus I2C-1 (SHT30, OLED-1, RTC)
@@ -64,6 +64,12 @@
 #define PIN_BTN_START       26  // Push Button Start Hardware (INPUT_PULLUP)
 #define PIN_BTN_START_ALT   4   // Push Button Start Alternatif/Simulasi (INPUT_PULLUP)
 #define PIN_DIMMER_ZC       34  // Input Zero-Cross Detector RobotDyn AC Dimmer
+
+// Lebar pulsa Servo MG996R (standar 50 Hz: 500 us = 0 deg, 2500 us = 180 deg)
+// Catatan daya: MG996R menarik arus hingga ~2.5 A saat stall (4.8-6.6 V), WAJIB pakai
+// catu +5V TB-1512 minimal 3 A + kapasitor 470-1000 uF dekat konektor servo.
+#define SERVO_PULSE_MIN_US  500
+#define SERVO_PULSE_MAX_US  2500
 
 // Alamat I2C Perangkat (Agar Tidak Bentrok)
 #define I2C_ADDR_SHT30      0x44
@@ -160,7 +166,7 @@ Adafruit_SHT31    sht30   = Adafruit_SHT31();
 Adafruit_SSD1306  oled(OLED_WIDTH, OLED_HEIGHT, &Wire, OLED_RESET);     // OLED-1 di Bus I2C-1 (GPIO 21/22)
 Adafruit_SSD1306  oled2(OLED_WIDTH, OLED_HEIGHT, &I2C_Dua, OLED_RESET); // OLED-2 di Bus I2C-2 (GPIO 16/17)
 RTC_DS3231        rtc;
-Servo             mg90sServo;
+Servo             mg996rServo;
 Preferences       prefs;
 WebServer         portalServer(80);
 DNSServer         portalDns;
@@ -267,7 +273,7 @@ struct IncubatorState {
   bool   lampSeedOnFirstAuto = true;
   bool   lampFuzzyActive     = true;
 
-  // Ventilasi (Motor Servo MG90S GPIO 18 - 4 Mode Otomatis Bertahap / Manual)
+  // Ventilasi (Motor Servo MG996R GPIO 18 - 4 Mode Otomatis Bertahap / Manual)
   String ventMode                = "auto"; // "auto" | "manual"
   int    ventAngle               = 15;     // 0..90 derajat
   int    ventDiscreteMode        = 1;      // 0=Tutup(0°), 1=Oksigen(15°), 2=Sirkulasi(40°), 3=Darurat(90°)
@@ -479,7 +485,7 @@ void saveSettingsToNVS() {
 }
 
 // ============================================================================
-// 9. AKTUATOR: ROBOTDYN AC DIMMER (GPIO 25/34), SERVO MG90S (GPIO 18), BUZZER
+// 9. AKTUATOR: ROBOTDYN AC DIMMER (GPIO 25/34), SERVO MG996R (GPIO 18), BUZZER
 // ============================================================================
 void applyLampOutput(int intensityPercent) {
   int clamped = constrain(intensityPercent, 0, 100);
@@ -505,15 +511,15 @@ void applyLampOutput(int intensityPercent) {
 void applyVentilationOutput(int angleDeg) {
   int clamped = constrain(angleDeg, VENT_ANGLE_MIN, VENT_ANGLE_MAX);
   // Pastikan servo masih ter-attach (bisa lepas jika channel LEDC gagal dialokasikan saat boot)
-  if (!mg90sServo.attached()) {
-    mg90sServo.setPeriodHertz(50);
-    int ch = mg90sServo.attach(PIN_SERVO_MG90S, 500, 2400);
-    Serial.printf("[SERVO] Re-attach GPIO %d -> %s\n", PIN_SERVO_MG90S, mg90sServo.attached() ? "OK" : "GAGAL");
+  if (!mg996rServo.attached()) {
+    mg996rServo.setPeriodHertz(50);
+    int ch = mg996rServo.attach(PIN_SERVO_MG996R, SERVO_PULSE_MIN_US, SERVO_PULSE_MAX_US);
+    Serial.printf("[SERVO] Re-attach GPIO %d -> %s\n", PIN_SERVO_MG996R, mg996rServo.attached() ? "OK" : "GAGAL");
     (void)ch;
   }
   bool changed = (state.ventAngle != clamped);
   state.ventAngle = clamped;
-  mg90sServo.write(clamped);
+  mg996rServo.write(clamped);
   if (changed) Serial.printf("[SERVO] Ventilasi -> %d deg (mode=%s)\n", clamped, state.ventMode.c_str());
 }
 
@@ -569,7 +575,7 @@ void updateBuzzerAlarm() {
 // ============================================================================
 // A. Lampu Pemanas (AC Dimmer): Fuzzy Mamdani (2 Input -> 1 Output) + Filter EMA
 //    + Trim Adaptif Ruangan + Pergeseran Halus (Slew-Rate Limiter +/-1.5%..4%).
-// B. Ventilasi (Servo MG90S): 4 Mode Posisi Tetap + Histeresis + Jeda 15 detik
+// B. Ventilasi (Servo MG996R): 4 Mode Posisi Tetap + Histeresis + Jeda 15 detik
 //    (0° Tutup, 15° Oksigen Minimal, 40° Sirkulasi/Lockdown/Lembap, 90° Buang Panas).
 
 enum FuzzyErrorSet {
@@ -2487,19 +2493,19 @@ void setup() {
   state.rtcAvailable = rtc.begin(&Wire);
   Serial.printf("[I2C-1] RTC    (0x68): %s\n", state.rtcAvailable ? "OK" : "TIDAK TERDETEKSI");
 
-  // 3. Inisialisasi Servo MG90S (GPIO 18)
+  // 3. Inisialisasi Servo MG996R (GPIO 18)
   // Alokasikan timer LEDC secara eksplisit agar servo dapat channel PWM yang valid
   ESP32PWM::allocateTimer(0);
   ESP32PWM::allocateTimer(1);
   ESP32PWM::allocateTimer(2);
   ESP32PWM::allocateTimer(3);
-  mg90sServo.setPeriodHertz(50);
-  mg90sServo.attach(PIN_SERVO_MG90S, 500, 2400);
-  Serial.printf("[SERVO] Attach GPIO %d: %s\n", PIN_SERVO_MG90S, mg90sServo.attached() ? "OK" : "GAGAL");
+  mg996rServo.setPeriodHertz(50);
+  mg996rServo.attach(PIN_SERVO_MG996R, SERVO_PULSE_MIN_US, SERVO_PULSE_MAX_US);
+  Serial.printf("[SERVO] Attach GPIO %d: %s\n", PIN_SERVO_MG996R, mg996rServo.attached() ? "OK" : "GAGAL");
   // Uji gerak singkat saat boot (0 -> 45 -> posisi tersimpan) untuk verifikasi hardware
   int savedVentAngle = state.ventAngle;
-  mg90sServo.write(0);   delay(400);
-  mg90sServo.write(45);  delay(400);
+  mg996rServo.write(0);   delay(400);
+  mg996rServo.write(45);  delay(400);
   state.ventAngle = -1;  // paksa log & tulis ulang
   applyVentilationOutput(savedVentAngle);
 

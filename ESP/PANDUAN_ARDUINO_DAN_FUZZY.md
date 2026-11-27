@@ -34,7 +34,7 @@ Cari dan instal **7 library** berikut di *Library Manager* (pastikan klik **Inst
 | 4 | **Adafruit SSD1306** | `<Adafruit_SSD1306.h>` | *Adafruit* | Driver utama untuk **Dual OLED 0.96" 128x64 (`0x3C`)** |
 | 5 | **Adafruit BusIO** | *(Dependensi I2C/SPI)* | *Adafruit* | **Wajib ada!** Dipakai di balik layar oleh `Adafruit_SHT31`, `Adafruit_SSD1306`, `Adafruit_GFX`, dan `RTClib` |
 | 6 | **RTClib** | `<RTClib.h>` | *Adafruit* | Membaca & menyinkronkan waktu ke **RTC DS3231SN (`0x68`)** |
-| 7 | **ESP32Servo** | `<ESP32Servo.h>` | *Kevin Harrington, John K. Bennett* | Menggerakkan **Motor Servo MG90S (`GPIO 18`)** |
+| 7 | **ESP32Servo** | `<ESP32Servo.h>` | *Kevin Harrington, John K. Bennett* | Menggerakkan **Motor Servo MG996R (`GPIO 18`)** |
 
 ### B. Library Bawaan Core ESP32 (Otomatis Terinstal Bersama Board `esp32 by Espressif Systems`)
 
@@ -52,7 +52,7 @@ Library berikut **tidak perlu dicari di Library Manager** karena sudah langsung 
 |---|---|---|---|
 | **GPIO 16 (RX2)** | Jalur SDA2 I2C-2 (OLED-2) | `I2C_Dua.begin(16, 17)` | Jalur data khusus **OLED-2 (`0x3C`)** (Status Wi-Fi dBm, `SETTER`/`LOCKDOWN`, `DAY XX/21`, Waktu Mulai). |
 | **GPIO 17 (TX2)** | Jalur SCL2 I2C-2 (OLED-2) | `I2C_Dua.begin(16, 17)` | Jalur clock khusus **OLED-2 (`0x3C`)**. |
-| **GPIO 18** | Signal Servo MG90S (1 Unit) | `mg90sServo.attach(18, 500, 2400)` | Mengatur sudut bukaan `0°` (tutup) s/d `90°` (buka penuh) secara otomatis (Fuzzy) atau manual. |
+| **GPIO 18** | Signal Servo MG996R (1 Unit) | `mg996rServo.attach(18, 500, 2500)` | Mengatur sudut bukaan `0°` (tutup) s/d `90°` (buka penuh) secara otomatis (Fuzzy) atau manual. Catu daya `+5V` minimal **3 A** + kapasitor **470–1000 µF** (arus stall ~2.5 A). |
 | **GPIO 19** | Buzzer Aktif SFM-27 (+) | `OUTPUT` | Berbunyi *beep-beep* intermiten (300ms ON / 700ms OFF) saat suhu di luar batas aman (`< 36.5°C` atau `> 38.5°C`) atau sensor error. |
 | **GPIO 21** | Jalur SDA1 I2C-1 Bersama | `Wire.begin(21, 22)` | Terhubung paralel ke **SHT30 (`0x44`)**, **OLED-1 (`0x3C`)** (Suhu, Ikon Telur, Kelembapan, Jam), dan **RTC DS3231 (`0x68`)**. |
 | **GPIO 22** | Jalur SCL1 I2C-1 Bersama | `Wire.begin(21, 22)` | Jalur clock I2C-1 untuk ketiga modul di atas. |
@@ -97,7 +97,7 @@ Keunggulan utama **Fuzzy Mamdani** adalah baik **Input** maupun **Output** sama-
    * **Terang (`LAMP_TERANG`):** Kurva Segitiga $[55\%,\ 75\%,\ 95\%]$ *(titik berat $= 75\%$)*.
    * **Sangat Terang (`LAMP_SANGAT_TERANG`):** Kurva Bahu Kanan $[90\%,\ 100\%]$ *(titik berat $\approx 97\%$)*.
 
-2. **Output 2 — Sudut Bukaan Servo Ventilasi MG90S (`0° – 90°`, 5 Himpunan):**
+2. **Output 2 — Sudut Bukaan Servo Ventilasi MG996R (`0° – 90°`, 5 Himpunan):**
    * **Tutup (`VENT_TUTUP`):** Kurva Bahu Kiri $[0^\circ,\ 10^\circ]$ *(titik berat $\approx 3^\circ$)*.
    * **Buka Kecil (`VENT_BUKA_KECIL`):** Kurva Segitiga $[5^\circ,\ 25^\circ,\ 45^\circ]$ *(titik berat $= 25^\circ$)*.
    * **Buka Sedang (`VENT_BUKA_SEDANG`):** Kurva Segitiga $[25^\circ,\ 45^\circ,\ 65^\circ]$ *(titik berat $= 45^\circ$)*.

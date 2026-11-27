@@ -16,7 +16,7 @@ Sistem ini dirancang untuk memantau dan mengendalikan proses penetasan telur sel
 
 | Lapisan | Lokasi di Workspace | Teknologi Utama | Peran dalam Sistem |
 | :--- | :--- | :--- | :--- |
-| **Firmware IoT** | [`ESP/sketch_nov6a/sketch_nov6a.ino`](file:///c:/ITIOT/ESP/sketch_nov6a/sketch_nov6a.ino) & [`ESP/PANDUAN_ARDUINO_DAN_FUZZY.md`](file:///c:/ITIOT/ESP/PANDUAN_ARDUINO_DAN_FUZZY.md) | Arduino C++ (ESP32 DOIT 30-Pin), `ArduinoJson` v7.x | Membaca sensor I2C, menjalankan Logika Fuzzy Mamdani lokal secara real-time, menggerakkan AC Dimmer & Servo MG90S, menampilkan status ke OLED, menyimpan state ke NVS, serta sinkronisasi HTTP ke Backend. |
+| **Firmware IoT** | [`ESP/sketch_nov6a/sketch_nov6a.ino`](file:///c:/ITIOT/ESP/sketch_nov6a/sketch_nov6a.ino) & [`ESP/PANDUAN_ARDUINO_DAN_FUZZY.md`](file:///c:/ITIOT/ESP/PANDUAN_ARDUINO_DAN_FUZZY.md) | Arduino C++ (ESP32 DOIT 30-Pin), `ArduinoJson` v7.x | Membaca sensor I2C, menjalankan Logika Fuzzy Mamdani lokal secara real-time, menggerakkan AC Dimmer & Servo MG996R, menampilkan status ke OLED, menyimpan state ke NVS, serta sinkronisasi HTTP ke Backend. |
 | **Backend API & CLI** | [`backend/`](file:///c:/ITIOT/backend/README.md) ([`cmd/server/main.go`](file:///c:/ITIOT/backend/cmd/server/main.go), [`cmd/create-user/main.go`](file:///c:/ITIOT/backend/cmd/create-user/main.go)) | Go + Fiber v3 + MySQL | Gerbang keamanan, autentikasi sesi & perangkat, *TrustProxy* untuk *rate limiter*, validasi perintah kontrol, enkripsi Wi-Fi AES-256-GCM, penyimpanan histori telemetri, deteksi *stale* (`15 detik`), notifikasi Telegram, serta CLI injeksi akun operator. |
 | **Frontend Web** | [`frontend/`](file:///c:/ITIOT/frontend/README.md) ([`src/routes/+layout.svelte`](file:///c:/ITIOT/frontend/src/routes/+layout.svelte)) | SvelteKit (SPA `ssr=false`), Svelte 5 Runes, Tailwind CSS v4 | Antarmuka operator untuk memantau dashboard live, grafik & evaluasi stabilitas historis, mengirim perintah kontrol, mengatur target & Wi-Fi, melihat peringatan, dan membaca log audit. |
 | **Docker & Proxy** | [`docker-compose.yml`](file:///c:/ITIOT/docker-compose.yml), [`.env.docker`](file:///c:/ITIOT/.env.docker), [`backend/Dockerfile`](file:///c:/ITIOT/backend/Dockerfile), [`frontend/Dockerfile`](file:///c:/ITIOT/frontend/Dockerfile), [`frontend/nginx.conf`](file:///c:/ITIOT/frontend/nginx.conf) | Docker Compose, MySQL 8.4, Nginx Alpine | Menjalankan stack 3 container (`mysql`, `backend`, `frontend`), melayani file statis SvelteKit sekaligus melakukan reverse proxy `/api/` ke `backend:3000`. |
@@ -30,7 +30,7 @@ flowchart LR
         SEN["Sensor SHT30 (0x44) & RTC DS3231 (0x68)"]
         SW["Push Button Start (GPIO 26)"]
         FUZ["Logika Fuzzy Mamdani & State Siklus 21 Hari"]
-        ACT["AC Dimmer (GPIO 34/25), Servo MG90S (GPIO 18), OLED (0x3C), Buzzer (GPIO 19)"]
+        ACT["AC Dimmer (GPIO 34/25), Servo MG996R (GPIO 18), OLED (0x3C), Buzzer (GPIO 19)"]
         NVS["Memori NVS Flash (loadSettingsFromNVS / saveSettingsToNVS)"]
         SEN --> FUZ
         SW --> FUZ
@@ -76,7 +76,7 @@ flowchart LR
 
 ### Catatan Penyesuaian Hardware Final vs PRD Awal
 
-Pada spesifikasi awal di PRD v2.0 & Kontrak API, sistem sempat mengasumsikan keberadaan **motor DC + sensor Hall encoder** (`PIN_MOTOR_*`) terpisah dari servo ventilasi. Namun pada **revisi final wiring ESP32 DOIT (30-Pin)**, motor stepper/DC pemutar rak ditiadakan dan sistem memakai **1 unit Servo MG90S** (`GPIO 18`) serta **1 unit Push Button Start** (`GPIO 26`).
+Pada spesifikasi awal di PRD v2.0 & Kontrak API, sistem sempat mengasumsikan keberadaan **motor DC + sensor Hall encoder** (`PIN_MOTOR_*`) terpisah dari servo ventilasi. Namun pada **revisi final wiring ESP32 DOIT (30-Pin)**, motor stepper/DC pemutar rak ditiadakan dan sistem memakai **1 unit Servo MG996R** (`GPIO 18`) serta **1 unit Push Button Start** (`GPIO 26`).
 
 Agar aplikasi Web Frontend dan Kontrak API Backend tetap kompatibel tanpa perlu menulis ulang antarmuka pengguna, firmware [`sketch_nov6a.ino`](file:///c:/ITIOT/ESP/sketch_nov6a/sketch_nov6a.ino) tetap menyertakan objek `motor` dan field jadwal `turning` di dalam payload JSON telemetri.
 
@@ -93,7 +93,7 @@ Sesuai panduan wiring final:
    - Pin `VIN` (atau `5V`) ESP32 $\leftarrow$ `+5.0V` Utama (Baut 1 & 2 TB-1512).
    - Pin `GND` ESP32 $\leftarrow$ `GND` Bersama (Baut 3 & 4 TB-1512).
    - Pin `3V3` ESP32 $\rightarrow$ Jalur `+3.3V` Sensor (Baut 7 TB-1512) untuk menyuplai **SHT30**, **OLED SSD1306**, **RTC DS3231SN**, dan **RobotDyn AC Dimmer**.
-   - **Jalur Daya Servo MG90S:** Kabel `VCC` (Merah) & `GND` (Cokelat) servo diambil langsung dari Baut `+5.0V` dan `GND` TB-1512, **bukan** dari ESP32.
+   - **Jalur Daya Servo MG996R:** Kabel `VCC` (Merah) & `GND` (Cokelat) servo diambil langsung dari Baut `+5.0V` dan `GND` TB-1512, **bukan** dari ESP32. Servo ini menarik arus hingga **~2.5 A saat stall**, sehingga catu `+5V` wajib mampu **minimal 3 A** dan dipasang kapasitor elektrolit **470–1000 µF** di dekat konektor servo agar ESP32 tidak *brownout*/restart.
 
 2. **Tabel Penggunaan GPIO & Alamat I2C:**
 
@@ -101,7 +101,7 @@ Sesuai panduan wiring final:
 | :--- | :--- | :--- | :--- |
 | `PIN_I2C2_SDA` | `GPIO 16` (`RX2`) | I2C-2 Data | Jalur SDA2 khusus Layar OLED-2 (`I2C_Dua`). |
 | `PIN_I2C2_SCL` | `GPIO 17` (`TX2`) | I2C-2 Clock | Jalur SCL2 khusus Layar OLED-2 (`I2C_Dua`). |
-| `PIN_SERVO_MG90S` | `GPIO 18` | PWM Output | Kabel oranye (Signal) Motor Servo MG90S (`VENT_ANGLE_MIN=0` s.d. `VENT_ANGLE_MAX=90`). |
+| `PIN_SERVO_MG996R` | `GPIO 18` | PWM Output | Kabel oranye (Signal) Motor Servo MG996R (`VENT_ANGLE_MIN=0` s.d. `VENT_ANGLE_MAX=90`). |
 | `PIN_BUZZER_SFM27` | `GPIO 19` | Digital Output | Kabel merah (+) Buzzer Aktif SFM-27; kabel hitam (-) ke GND Baseplate. |
 | `PIN_I2C_SDA` | `GPIO 21` | I2C-1 Data | Dicabang di Baut 5 TB-1512 ke SHT30, OLED-1, dan RTC. |
 | `PIN_I2C_SCL` | `GPIO 22` | I2C-1 Clock | Dicabang di Baut 6 TB-1512 ke SHT30, OLED-1, dan RTC. |
@@ -132,7 +132,7 @@ Untuk menjaga suhu tetap stabil di sekitar target (`TEMP_DEFAULT_TARGET = 37.5f`
 - **1. Fuzzifikasi Input:** Menggunakan fungsi kurva `fuzzyLeftShoulder()`, `fuzzyTriangle()`, dan `fuzzyRightShoulder()` untuk mengubah **Error Suhu ($e$)** ke 3 himpunan (`ERR_DINGIN`, `ERR_NORMAL`, `ERR_PANAS`) serta **Perubahan Suhu ($\Delta e$)** ke 3 himpunan (`DERR_TURUN`, `DERR_STABIL`, `DERR_NAIK`).
 - **2. Basis Aturan Linguistik (`3x3 = 9 Aturan IF-THEN`) & Implikasi `MIN`:** Mengombinasikan 2 input menggunakan operator `MIN` (`AND`) untuk memotong (*clipping*) tinggi kurva himpunan output:
   1. **Himpunan Output Lampu AC Dimmer (`muOutputLamp`):** 5 himpunan linguistik (`LAMP_MATI`, `LAMP_REDUP`, `LAMP_SEDANG`, `LAMP_TERANG`, `LAMP_SANGAT_TERANG`) pada rentang otomatis hingga `LAMP_AUTO_MAX_PCT = 100` (sedangkan kontrol manual dari Web dibatasi pada `LAMP_MANUAL_MAX_PCT = 80`).
-  2. **Himpunan Output Servo Ventilasi MG90S (`muOutputVent`):** 5 himpunan linguistik (`VENT_TUTUP`, `VENT_BUKA_KECIL`, `VENT_BUKA_SEDANG`, `VENT_BUKA_LEBAR`, `VENT_BUKA_PENUH`) pada rentang `VENT_ANGLE_MIN = 0°` sampai `VENT_ANGLE_MAX = 90°`.
+  2. **Himpunan Output Servo Ventilasi MG996R (`muOutputVent`):** 5 himpunan linguistik (`VENT_TUTUP`, `VENT_BUKA_KECIL`, `VENT_BUKA_SEDANG`, `VENT_BUKA_LEBAR`, `VENT_BUKA_PENUH`) pada rentang `VENT_ANGLE_MIN = 0°` sampai `VENT_ANGLE_MAX = 90°`.
 - **3. Agregasi `MAX` & Defuzzifikasi Centroid (*Center of Area*):** Menggabungkan kurva output yang terpotong dengan operator `MAX`, lalu menghitung titik berat kurva melalui `defuzzifyCentroidLamp()` dan `defuzzifyCentroidVent()` (detail rumus dan matriks tersedia di [`ESP/PANDUAN_ARDUINO_DAN_FUZZY.md`](file:///c:/ITIOT/ESP/PANDUAN_ARDUINO_DAN_FUZZY.md)).
 - **4. Pengaman Suhu Ekstrem & Passive Humidity Override:** Memaksa lampu `0%` / ventilasi `90°` jika suhu melewati `TEMP_SAFE_MAX = 38.5f`, serta membuka ventilasi minimal `35°` saat kelembapan melewati `HUMIDITY_WARN_MAX = 75.0f` dan suhu tidak dingin.
 
