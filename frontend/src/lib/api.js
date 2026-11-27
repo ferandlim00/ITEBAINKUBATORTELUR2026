@@ -162,8 +162,9 @@ export async function sendCommand(command) {
       setTimeout(() => { mockOverride.turn = false; }, 8000);
     }
     if (command.target === 'buzzer') {
-      if (command.action === 'mute') mockOverride.buzzer = { ...(mockOverride.buzzer ?? { style: 'rock_beat' }), muted: true };
-      else if (command.action === 'unmute') mockOverride.buzzer = { ...(mockOverride.buzzer ?? { style: 'rock_beat' }), muted: false };
+      if (command.action === 'mute') mockOverride.buzzer = { ...(mockOverride.buzzer ?? { style: 'numb' }), muted: true };
+      else if (command.action === 'unmute') mockOverride.buzzer = { ...(mockOverride.buzzer ?? { style: 'numb' }), muted: false };
+      else if (command.action === 'style_numb') mockOverride.buzzer = { muted: false, style: 'numb' };
       else if (command.action === 'style_beat') mockOverride.buzzer = { muted: false, style: 'rock_beat' };
       else if (command.action === 'style_tone') mockOverride.buzzer = { muted: false, style: 'rock_tone' };
     }

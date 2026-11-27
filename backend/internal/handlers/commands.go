@@ -157,8 +157,10 @@ func validateCommand(snap models.TelemetryResponse, req models.CommandRequest) (
 			return 0, "style_beat", "Gaya lagu buzzer diubah ke Rock Beat (We Will Rock You)", ""
 		case "style_tone":
 			return 0, "style_tone", "Gaya lagu buzzer diubah ke Rock Nada (Smoke on the Water)", ""
+		case "style_numb":
+			return 0, "style_numb", "Gaya lagu buzzer diubah ke Linkin Park - Numb", ""
 		default:
-			return fiber.StatusBadRequest, "", "", "Aksi buzzer tidak dikenali (gunakan 'mute', 'unmute', 'test_rock', 'style_beat', atau 'style_tone')."
+			return fiber.StatusBadRequest, "", "", "Aksi buzzer tidak dikenali (gunakan 'mute', 'unmute', 'test_rock', 'style_numb', 'style_beat', atau 'style_tone')."
 		}
 
 	default:

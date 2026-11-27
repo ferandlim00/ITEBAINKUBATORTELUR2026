@@ -313,7 +313,7 @@ struct IncubatorState {
 
   // Pengaturan Buzzer Lagu Rock & Mute + Pengaturan Tampilan OLED (tersimpan di NVS)
   bool    buzzerMuted      = false; // true = alarm dibisukan (MUTE)
-  uint8_t buzzerStyle      = 0;     // 0 = Rock Beat (We Will Rock You), 1 = Rock Nada (Smoke on the Water)
+  uint8_t buzzerStyle      = 2;     // 0 = We Will Rock You, 1 = Smoke on the Water, 2 = Linkin Park - Numb (Default)
   uint8_t oledBrightness   = 2;     // 0 = Hemat (Redup), 1 = Sedang, 2 = Cerah Penuh
   bool    oledSwapScreens  = false; // true = tukar posisi tampilan OLED 1 <-> OLED 2
 
@@ -456,7 +456,7 @@ void loadSettingsFromNVS() {
   state.ventMode             = prefs.getString("vent_mode", "auto");
   state.ventAngle            = prefs.getInt("vent_ang", VENT_MODE_ANGLES[1]);
   state.buzzerMuted          = prefs.getBool("bz_mute", false);
-  state.buzzerStyle          = (uint8_t)constrain((int)prefs.getUChar("bz_style", 0), 0, 1);
+  state.buzzerStyle          = (uint8_t)constrain((int)prefs.getUChar("bz_style", 2), 0, 2);
   state.oledBrightness       = (uint8_t)constrain((int)prefs.getUChar("oled_br", 2), 0, 2);
   state.oledSwapScreens      = prefs.getBool("oled_swap", false);
   prefs.end();
@@ -682,6 +682,21 @@ const RockStep ROCK_SONG_TONE[] = {
 };
 const uint8_t ROCK_SONG_TONE_LEN = sizeof(ROCK_SONG_TONE) / sizeof(ROCK_SONG_TONE[0]);
 
+// Lagu Rock 3 (Default): Linkin Park - "Numb" (Intro Synth Riff F#m + Chorus "I've become so numb")
+const RockStep ROCK_SONG_NUMB[] = {
+  // Intro Bar 1-2: C#5 - E5 - C#5 - F#5 - A5 - G#5
+  { 554, 240,  40 }, { 659, 240,  40 }, { 554, 240,  40 },
+  { 740, 500,  60 }, { 880, 500,  60 }, { 831, 740, 260 },
+  // Intro Bar 3-4: C#5 - E5 - C#5 - A5 - G#5 - E5
+  { 554, 240,  40 }, { 659, 240,  40 }, { 554, 240,  40 },
+  { 880, 500,  60 }, { 831, 500,  60 }, { 659, 760, 280 },
+  // Chorus: "I've be-come so numb" (A5 - G#5 - F#5 - E5 - F#5)
+  { 880, 240,  40 }, { 831, 240,  40 }, { 740, 260,  40 }, { 659, 260,  40 }, { 740, 620, 200 },
+  // Chorus: "I can't feel you there" (F#5 - G#5 - A5 - E5 - C#5)
+  { 740, 240,  40 }, { 831, 240,  40 }, { 880, 260,  40 }, { 659, 280,  40 }, { 554, 700, 520 }
+};
+const uint8_t ROCK_SONG_NUMB_LEN = sizeof(ROCK_SONG_NUMB) / sizeof(ROCK_SONG_NUMB[0]);
+
 // Jingle pendek konfirmasi aksi tombol (non-blocking)
 const RockStep CUE_START_RIFF[] = {
   { 330, 95, 45 }, { 392, 95, 45 }, { 440, 95, 45 }, { 587, 280, 80 }
@@ -784,21 +799,30 @@ bool isAlarmConditionActive() {
 
 void updateBuzzerAlarm() {
   unsigned long nowMs = millis();
-  bool useTone = (state.buzzerStyle == 1);
+  const RockStep* activeSong = ROCK_SONG_BEAT;
+  uint8_t activeSongLen = ROCK_SONG_BEAT_LEN;
+  bool useTone = false;
+  if (state.buzzerStyle == 2) {
+    activeSong    = ROCK_SONG_NUMB;
+    activeSongLen = ROCK_SONG_NUMB_LEN;
+    useTone       = true;
+  } else if (state.buzzerStyle == 1) {
+    activeSong    = ROCK_SONG_TONE;
+    activeSongLen = ROCK_SONG_TONE_LEN;
+    useTone       = true;
+  }
 
   // 1. Prioritas Cue / Preview Lagu Rock (berjalan sekali sampai selesai)
   if (activeBuzzerCue != BZ_CUE_NONE) {
     const RockStep* seq = nullptr;
     uint8_t seqLen = 0;
+    bool cueTone = useTone;
     switch (activeBuzzerCue) {
-      case BZ_CUE_CLICK:        seq = CUE_CLICK_TICK; seqLen = 1; break;
+      case BZ_CUE_CLICK:        seq = CUE_CLICK_TICK; seqLen = 1; cueTone = false; break;
       case BZ_CUE_START:        seq = CUE_START_RIFF; seqLen = 4; break;
       case BZ_CUE_STOP:         seq = CUE_STOP_RIFF;  seqLen = 3; break;
       case BZ_CUE_WIFI:         seq = CUE_WIFI_RIFF;  seqLen = 2; break;
-      case BZ_CUE_PREVIEW_ROCK:
-        seq    = useTone ? ROCK_SONG_TONE : ROCK_SONG_BEAT;
-        seqLen = useTone ? ROCK_SONG_TONE_LEN : ROCK_SONG_BEAT_LEN;
-        break;
+      case BZ_CUE_PREVIEW_ROCK: seq = activeSong;     seqLen = activeSongLen; break;
       default: break;
     }
 
@@ -811,7 +835,7 @@ void updateBuzzerAlarm() {
     if (buzzerPhaseStartMs == 0) {
       buzzerInOnPhase    = true;
       buzzerPhaseStartMs = nowMs;
-      buzzerHwOn(seq[buzzerStepIdx].freqHz, useTone);
+      buzzerHwOn(seq[buzzerStepIdx].freqHz, cueTone);
       return;
     }
 
@@ -828,7 +852,7 @@ void updateBuzzerAlarm() {
           buzzerHwOff();
         } else {
           buzzerInOnPhase = true;
-          buzzerHwOn(seq[buzzerStepIdx].freqHz, useTone);
+          buzzerHwOn(seq[buzzerStepIdx].freqHz, cueTone);
         }
       }
     }
@@ -848,28 +872,25 @@ void updateBuzzerAlarm() {
     return;
   }
 
-  const RockStep* song = useTone ? ROCK_SONG_TONE : ROCK_SONG_BEAT;
-  uint8_t songLen      = useTone ? ROCK_SONG_TONE_LEN : ROCK_SONG_BEAT_LEN;
-
   if (!alarmWasActive) {
     alarmWasActive     = true;
     buzzerStepIdx      = 0;
     buzzerInOnPhase    = true;
     buzzerPhaseStartMs = nowMs;
-    buzzerHwOn(song[0].freqHz, useTone);
+    buzzerHwOn(activeSong[0].freqHz, useTone);
     return;
   }
 
-  unsigned long waitMs = buzzerInOnPhase ? song[buzzerStepIdx].onMs : song[buzzerStepIdx].offMs;
+  unsigned long waitMs = buzzerInOnPhase ? activeSong[buzzerStepIdx].onMs : activeSong[buzzerStepIdx].offMs;
   if (nowMs - buzzerPhaseStartMs >= waitMs) {
     buzzerPhaseStartMs = nowMs;
     if (buzzerInOnPhase) {
       buzzerInOnPhase = false;
       buzzerHwOff();
     } else {
-      buzzerStepIdx   = (buzzerStepIdx + 1) % songLen;
+      buzzerStepIdx   = (buzzerStepIdx + 1) % activeSongLen;
       buzzerInOnPhase = true;
-      buzzerHwOn(song[buzzerStepIdx].freqHz, useTone);
+      buzzerHwOn(activeSong[buzzerStepIdx].freqHz, useTone);
     }
   }
 }
@@ -1255,13 +1276,17 @@ void executeMenuSelection(uint8_t itemIdx) {
       }
       break;
 
-    case 1: // Mode & Mute Buzzer (ROCK BEAT -> ROCK NADA -> MUTE)
+    case 1: // Mode & Mute Buzzer (LP NUMB -> ROCK BEAT -> SMOKE WATER -> MUTE)
       if (state.buzzerMuted) {
-        state.buzzerStyle = 0;
+        state.buzzerStyle = 2; // Linkin Park - Numb
         setBuzzerMuted(false);
         triggerBuzzerCue(BZ_CUE_CLICK);
+      } else if (state.buzzerStyle == 2) {
+        state.buzzerStyle = 0; // Queen - We Will Rock You
+        saveSettingsToNVS();
+        triggerBuzzerCue(BZ_CUE_CLICK);
       } else if (state.buzzerStyle == 0) {
-        state.buzzerStyle = 1;
+        state.buzzerStyle = 1; // Deep Purple - Smoke on the Water
         saveSettingsToNVS();
         triggerBuzzerCue(BZ_CUE_CLICK);
       } else {
@@ -1269,9 +1294,11 @@ void executeMenuSelection(uint8_t itemIdx) {
       }
       break;
 
-    case 2: // Tes Lagu Rock (Putar sampel riff lagu rock)
+    case 2: // Tes Lagu Rock (Putar sampel riff lagu rock aktif)
       triggerBuzzerCue(BZ_CUE_PREVIEW_ROCK);
-      showOledToast("LAGU ROCK!", (state.buzzerStyle == 1) ? "Smoke On Water" : "We Will Rock U");
+      if (state.buzzerStyle == 2)      showOledToast("LINKIN PARK!", "Numb - Playing..");
+      else if (state.buzzerStyle == 1) showOledToast("DEEP PURPLE!", "Smoke On Water");
+      else                             showOledToast("QUEEN ROCK!", "We Will Rock U");
       break;
 
     case 3: // Tes Gerak Fisik Servo MG996R (0 -> 45 -> 90 -> kembali)
@@ -1772,7 +1799,8 @@ String getOledMenuLabel(uint8_t idx) {
       return (state.incubationStatus == "running") ? "Hentikan Siklus" : "Mulai Inkubasi";
     case 1:
       if (state.buzzerMuted)        return "Buzzer: MUTE";
-      if (state.buzzerStyle == 1)   return "Buzzer: ROCK NADA";
+      if (state.buzzerStyle == 2)   return "Buzzer: LP - NUMB";
+      if (state.buzzerStyle == 1)   return "Buzzer: SMOKE WTR";
       return "Buzzer: ROCK BEAT";
     case 2:
       return "Tes Lagu Rock";
@@ -2709,6 +2737,12 @@ void processIncomingCommand(JsonVariantConst cmdObj) {
       setBuzzerMuted(false);
       triggerBuzzerCue(BZ_CUE_PREVIEW_ROCK);
       recordCommandResult(cmdId, "buzzer", "style_tone", true);
+    } else if (action == "style_numb") {
+      state.buzzerStyle = 2;
+      setBuzzerMuted(false);
+      triggerBuzzerCue(BZ_CUE_PREVIEW_ROCK);
+      showOledToast("LINKIN PARK!", "Numb Dipilih");
+      recordCommandResult(cmdId, "buzzer", "style_numb", true);
     } else {
       recordCommandResult(cmdId, "buzzer", action, false);
     }
@@ -2851,7 +2885,7 @@ void sendTelemetryAndPollBackend() {
 
   JsonObject bz = doc["buzzer"].to<JsonObject>();
   bz["muted"] = state.buzzerMuted;
-  bz["style"] = (state.buzzerStyle == 1) ? "rock_tone" : "rock_beat";
+  bz["style"] = (state.buzzerStyle == 2) ? "numb" : ((state.buzzerStyle == 1) ? "rock_tone" : "rock_beat");
 
   if (state.lastCmdId > 0) {
     JsonObject lastCmd = doc["last_command"].to<JsonObject>();

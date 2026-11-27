@@ -33,7 +33,7 @@ export const telemetryNormal = {
   // status: idle (menunggu jadwal) | turning | lockdown | fault
   turning: { status: 'idle', last_turned_at: ago(3600 * 2), next_turning_at: ago(-3600) },
   wifi: { connected: true, ssid: 'IncubatorNet', rssi: -58 }, // rssi dalam dBm
-  buzzer: { muted: false, style: 'rock_beat' }
+  buzzer: { muted: false, style: 'numb' }
 };
 
 // Data kedaluwarsa: sudah lama tidak diperbarui (FUN 01, DES 02)

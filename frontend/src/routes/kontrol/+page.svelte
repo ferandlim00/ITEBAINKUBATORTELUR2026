@@ -65,7 +65,7 @@
   let inc = $derived(data?.incubation ?? { status: 'idle', stage: null });
   let turning = $derived(data?.turning ?? { status: 'idle' });
   let motor = $derived(data?.motor ?? { running: false, encoder_ok: true });
-  let buzzer = $derived(data?.buzzer ?? { muted: false, style: 'rock_beat' });
+  let buzzer = $derived(data?.buzzer ?? { muted: false, style: 'numb' });
   let sp = $derived(statusPutar[turning.status] ?? statusPutar.idle);
 
   // Alasan tombol "Balik sekarang" tidak bisa dipakai (kosong = boleh)
@@ -195,7 +195,7 @@
         {#if buzzer.muted}
           <StatusBadge tone="warn" icon="🔇" label="Dibisukan (Mute)" />
         {:else}
-          <StatusBadge tone="ok" icon="🎸" label={buzzer.style === 'rock_tone' ? 'Rock Nada' : 'Rock Beat'} />
+          <StatusBadge tone="ok" icon="🎸" label={buzzer.style === 'numb' ? 'Linkin Park - Numb' : (buzzer.style === 'rock_tone' ? 'Smoke on the Water' : 'We Will Rock You')} />
         {/if}
       </div>
       <p class="mt-1.5 text-sm text-mute">
@@ -226,14 +226,19 @@
 
       <div class="mt-3 flex flex-wrap gap-2 text-xs">
         <button type="button" disabled={terkunci || sibuk.buzzer}
+          onclick={() => kirim('buzzer', { target: 'buzzer', action: 'style_numb' })}
+          class="rounded-lg border px-2.5 py-1.5 {buzzer.style === 'numb' ? 'border-ember bg-ember/15 text-ember2 font-semibold' : 'border-line text-mute'}">
+          Linkin Park - Numb
+        </button>
+        <button type="button" disabled={terkunci || sibuk.buzzer}
           onclick={() => kirim('buzzer', { target: 'buzzer', action: 'style_beat' })}
-          class="rounded-lg border px-2.5 py-1.5 {buzzer.style !== 'rock_tone' ? 'border-ember bg-ember/15 text-ember2 font-semibold' : 'border-line text-mute'}">
-          Gaya 1: We Will Rock You (Beat)
+          class="rounded-lg border px-2.5 py-1.5 {buzzer.style === 'rock_beat' ? 'border-ember bg-ember/15 text-ember2 font-semibold' : 'border-line text-mute'}">
+          We Will Rock You (Beat)
         </button>
         <button type="button" disabled={terkunci || sibuk.buzzer}
           onclick={() => kirim('buzzer', { target: 'buzzer', action: 'style_tone' })}
           class="rounded-lg border px-2.5 py-1.5 {buzzer.style === 'rock_tone' ? 'border-ember bg-ember/15 text-ember2 font-semibold' : 'border-line text-mute'}">
-          Gaya 2: Smoke on the Water (Nada)
+          Smoke on the Water
         </button>
       </div>
 
